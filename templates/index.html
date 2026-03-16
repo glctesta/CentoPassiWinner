@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Centopassi 2026 — Route Planner</title>
+    <meta name="description" content="Pianificatore intelligente di percorsi per la gara Centopassi 2026. Seleziona 100 waypoint ottimali su 4 giorni.">
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <!-- App CSS -->
+    <link rel="stylesheet" href="/static/css/style.css">
+    
+    <!-- Favicon -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏔️</text></svg>">
+</head>
+<body>
+    <div class="app-container">
+        <!-- ═══ Map ═══ -->
+        <div id="map">
+            <div class="map-overlay" id="map-instruction" style="display:none;">
+                <div class="instruction">
+                    <div class="pulse-dot"></div>
+                    <span class="inst-text">Clicca sulla mappa per posizionare il Traguardo</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ Sidebar ═══ -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h1>🏔️ CENTOPASSI</h1>
+                <div class="subtitle">Route Planner 2026 — 29 Mag → 1 Giu</div>
+            </div>
+
+            <div class="sidebar-content">
+                <!-- File Upload Card -->
+                <div class="card">
+                    <div class="card-title"><span class="icon">📂</span> Carica Waypoints</div>
+                    <div id="upload-zone" class="upload-zone" 
+                         ondragover="event.preventDefault(); this.classList.add('dragover')" 
+                         ondragleave="this.classList.remove('dragover')"
+                         ondrop="handleFileDrop(event)"
+                         onclick="document.getElementById('file-input').click()">
+                        <input type="file" id="file-input" accept=".gpx,.xlsx,.xls" style="display:none" 
+                               onchange="handleFileSelect(this.files[0])">
+                        <div class="upload-icon">📂</div>
+                        <div class="upload-text">Trascina qui un file <b>.GPX</b> o <b>.XLSX</b></div>
+                        <div class="upload-hint">oppure clicca per sfogliare</div>
+                    </div>
+                    <div id="loaded-file-info" class="loaded-file-info" style="display:none;">
+                        <span class="file-badge" id="file-badge">GPX</span>
+                        <span id="loaded-filename">—</span>
+                        <button class="btn btn-sm btn-secondary" onclick="document.getElementById('file-input').click()" 
+                                style="margin-left:auto; width:auto; padding:4px 10px;">
+                            🔄 Cambia
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Stats Card -->
+                <div class="card">
+                    <div class="card-title"><span class="icon">📊</span> Statistiche Waypoint</div>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-value" id="stat-total">—</div>
+                            <div class="stat-label">Waypoint Totali</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value gold" id="stat-gp">—</div>
+                            <div class="stat-label">Golden Points</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value unpaved" id="stat-unpaved">—</div>
+                            <div class="stat-label">Sterrati</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="stat-elevation">—</div>
+                            <div class="stat-label">Quota Max</div>
+                        </div>
+                    </div>
+                    <div class="legend">
+                        <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div> Normale</div>
+                        <div class="legend-item"><div class="legend-dot" style="background:#fbbf24"></div> Golden Point</div>
+                        <div class="legend-item"><div class="legend-dot" style="background:#fb923c"></div> Sterrato</div>
+                    </div>
+                </div>
+
+                <!-- Search Card -->
+                <div class="card">
+                    <div class="card-title"><span class="icon">🔍</span> Cerca Waypoint</div>
+                    <div class="search-container">
+                        <input type="text" id="wp-search" placeholder="Cerca per numero, nome, città..."
+                               oninput="searchWaypoints(this.value)" autocomplete="off">
+                        <button class="search-clear" id="search-clear" onclick="clearSearch()" style="display:none;">✕</button>
+                    </div>
+                    <div id="search-count" class="search-count" style="display:none;"></div>
+                    <div id="search-results" class="search-results"></div>
+                </div>
+                <div class="card">
+                    <div class="card-title"><span class="icon">🏁</span> Punto di Arrivo (Traguardo)</div>
+                    
+                    <div class="input-group">
+                        <label for="finish-name">Nome località</label>
+                        <input type="text" id="finish-name" placeholder="Es. Roma, Bologna, ...">
+                    </div>
+                    
+                    <div class="input-row">
+                        <div class="input-group">
+                            <label for="finish-lat">Latitudine</label>
+                            <input type="number" id="finish-lat" step="0.000001" placeholder="42.000000">
+                        </div>
+                        <div class="input-group">
+                            <label for="finish-lon">Longitudine</label>
+                            <input type="number" id="finish-lon" step="0.000001" placeholder="12.500000">
+                        </div>
+                    </div>
+
+                    <div style="display:flex;gap:8px;margin-top:8px;">
+                        <button class="btn btn-secondary" id="btn-set-coords" style="flex:1;">
+                            📌 Usa Coordinate
+                        </button>
+                        <button class="btn btn-primary" id="btn-set-finish" style="flex:1;">
+                            🗺️ Clicca su Mappa
+                        </button>
+                    </div>
+                    <div class="hint">
+                        Il punto di partenza verrà scelto automaticamente (max 450 km dal traguardo)
+                    </div>
+                </div>
+
+                <!-- Optimization Card -->
+                <div class="card">
+                    <div class="card-title"><span class="icon">⚙️</span> Ottimizzazione</div>
+                    
+                    <div class="input-group">
+                        <label>🔶 Gestione Sterrati</label>
+                        <div class="toggle-group">
+                            <button class="toggle-btn" data-unpaved="allow" onclick="setUnpavedMode('allow')">Includi tutti</button>
+                            <button class="toggle-btn active" data-unpaved="limit" onclick="setUnpavedMode('limit')">Limita max</button>
+                            <button class="toggle-btn" data-unpaved="exclude" onclick="setUnpavedMode('exclude')">Escludi tutti</button>
+                        </div>
+                    </div>
+                    
+                    <div class="input-group" id="max-unpaved-group">
+                        <label for="max-unpaved">Numero massimo sterrati: <span id="max-unpaved-val">10</span></label>
+                        <input type="range" id="max-unpaved" min="0" max="30" value="10" 
+                               oninput="document.getElementById('max-unpaved-val').textContent = this.value"
+                               style="accent-color: var(--unpaved-orange);">
+                    </div>
+                    
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="use-osrm">
+                        <label for="use-osrm">Usa routing OSRM reale (più lento, più preciso)</label>
+                    </div>
+                    
+                    <button class="btn btn-primary" id="btn-optimize" disabled>
+                        🚀 Calcola Percorso
+                    </button>
+                    
+                    <div class="progress-container" id="progress-container">
+                        <div class="progress-bar-bg">
+                            <div class="progress-bar-fill" id="progress-fill"></div>
+                        </div>
+                        <div class="progress-text" id="progress-text">Avvio...</div>
+                    </div>
+                </div>
+
+                <!-- Results Section (hidden initially) -->
+                <div id="results-section" style="display:none;">
+                    
+                    <!-- Score Card -->
+                    <div class="card score-card">
+                        <div class="card-title"><span class="icon">🏆</span> Punteggio Stimato</div>
+                        <div class="score-total">
+                            <div class="score-value" id="score-total">—</div>
+                            <div class="score-label">Punti Totali</div>
+                        </div>
+                        <div class="score-breakdown">
+                            <div class="score-row">
+                                <span class="label">Punti Passo</span>
+                                <span class="value" id="score-passes">—</span>
+                            </div>
+                            <div class="score-row">
+                                <span class="label">Golden Points</span>
+                                <span class="value" id="score-golden">—</span>
+                            </div>
+                            <div class="score-row">
+                                <span class="label">Punti Quota</span>
+                                <span class="value" id="score-elevation">—</span>
+                            </div>
+                            <div class="score-row">
+                                <span class="label">Bonus 100° Passo</span>
+                                <span class="value" id="score-bonus">—</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Route Summary -->
+                    <div class="card">
+                        <div class="card-title"><span class="icon">🗺️</span> Riepilogo Percorso</div>
+                        <div class="stats-grid">
+                            <div class="stat-item">
+                                <div class="stat-value success" id="result-total-km">—</div>
+                                <div class="stat-label">KM Totali</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value" id="result-total-wp">—</div>
+                                <div class="stat-label">Waypoint</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value gold" id="result-total-gp">—</div>
+                                <div class="stat-label">Golden Points</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value" id="result-total-elev">—</div>
+                                <div class="stat-label">Dislivello +</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Day Details -->
+                    <div class="card">
+                        <div class="card-title"><span class="icon">📅</span> Dettaglio Giornaliero</div>
+                        <div class="legend" style="margin-bottom:12px;">
+                            <div class="legend-item"><div class="legend-line" style="background:#6366f1"></div> G1</div>
+                            <div class="legend-item"><div class="legend-line" style="background:#06b6d4"></div> G2</div>
+                            <div class="legend-item"><div class="legend-line" style="background:#f59e0b"></div> G3</div>
+                            <div class="legend-item"><div class="legend-line" style="background:#ef4444"></div> G4</div>
+                            <div class="legend-item"><div class="legend-line dashed"></div> Sterrato</div>
+                        </div>
+                        <div id="days-container"></div>
+                    </div>
+
+                    <!-- Export -->
+                    <button class="btn btn-success" id="btn-export" style="display:none;">
+                        📥 Scarica GPX Percorso
+                    </button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Mobile sidebar toggle -->
+        <button class="sidebar-toggle" id="sidebar-toggle">☰</button>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- App JS -->
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
