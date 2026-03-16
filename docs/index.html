@@ -4,314 +4,224 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Centopassi® 2026 — Route Planner</title>
-    <meta name="description" content="Visualizzatore waypoints Centopassi 2026 con mappa, ricerca e filtri">
+    <meta name="description" content="Pianificatore percorso Centopassi 2026 con mappa, ottimizzazione e ricerca waypoints">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="optimizer.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
-:root{--bg-primary:#0f1117;--bg-secondary:#1a1d2e;--bg-card:rgba(26,29,46,.85);--bg-glass:rgba(26,29,46,.65);--border:rgba(255,255,255,.08);--border-active:rgba(99,102,241,.4);--text-primary:#f1f5f9;--text-secondary:#94a3b8;--text-muted:#64748b;--accent:#6366f1;--accent-light:#818cf8;--accent-glow:rgba(99,102,241,.15);--success:#22c55e;--warning:#f59e0b;--danger:#ef4444;--info:#3b82f6;--gp-gold:#fbbf24;--unpaved-orange:#fb923c;--radius:12px;--radius-sm:8px;--shadow:0 4px 24px rgba(0,0,0,.3);--sidebar-width:400px;--transition:all .3s cubic-bezier(.4,0,.2,1)}
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg-primary);color:var(--text-primary);overflow:hidden;height:100vh;width:100vw}
-.app-container{display:flex;height:100vh;width:100vw}
-#map{flex:1;height:100vh;z-index:1}
-.sidebar{width:var(--sidebar-width);height:100vh;background:var(--bg-glass);backdrop-filter:blur(20px);border-left:1px solid var(--border);display:flex;flex-direction:column;z-index:1000;overflow:hidden}
-.sidebar-header{padding:20px 24px 16px;border-bottom:1px solid var(--border);background:linear-gradient(135deg,rgba(99,102,241,.1),rgba(6,182,212,.05))}
-.sidebar-header h1{font-size:1.5rem;font-weight:800;letter-spacing:-.03em;background:linear-gradient(135deg,var(--accent-light),#06b6d4);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:4px}
-.sidebar-header .subtitle{font-size:.8rem;color:var(--text-muted);font-weight:400}
-.sidebar-content{flex:1;overflow-y:auto;padding:16px 20px;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
-.card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px;transition:var(--transition)}
-.card:hover{border-color:var(--border-active);box-shadow:0 0 20px var(--accent-glow)}
-.card-title{font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:12px;display:flex;align-items:center;gap:6px}
-.stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.stat-item{background:rgba(255,255,255,.03);border-radius:var(--radius-sm);padding:10px 12px;text-align:center}
-.stat-value{font-size:1.3rem;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--accent-light)}
-.stat-value.gold{color:var(--gp-gold)}.stat-value.unpaved{color:var(--unpaved-orange)}
-.stat-label{font-size:.65rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px}
-.legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
-.legend-item{display:flex;align-items:center;gap:4px;font-size:.65rem;color:var(--text-muted)}
-.legend-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
-.search-container{position:relative}
-.search-container input{width:100%;padding:10px 36px 10px 14px;background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-family:'Inter',sans-serif;font-size:.85rem;transition:var(--transition);outline:none}
-.search-container input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
-.search-container input::placeholder{color:var(--text-muted)}
-.search-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);font-size:.8rem;cursor:pointer;padding:4px;border-radius:50%}
-.search-clear:hover{color:var(--text-primary);background:rgba(255,255,255,.1)}
-.search-count{font-size:.7rem;color:var(--text-muted);margin-top:6px;padding:0 2px}
-.search-results{max-height:200px;overflow-y:auto;margin-top:6px;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
-.search-result-item{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:var(--radius-sm);font-size:.8rem;cursor:pointer;transition:var(--transition);border-bottom:1px solid rgba(255,255,255,.03)}
-.search-result-item:hover{background:rgba(99,102,241,.1)}
-.search-result-item .sr-number{font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--accent-light);min-width:40px}
-.search-result-item .sr-desc{flex:1;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.sr-badge{font-size:.6rem;padding:1px 5px;border-radius:4px;font-weight:600}
-.sr-badge.gp{background:rgba(251,191,36,.15);color:var(--gp-gold)}
-.sr-badge.unpaved{background:rgba(251,146,60,.15);color:var(--unpaved-orange)}
-.upload-zone{border:2px dashed var(--border);border-radius:var(--radius-sm);padding:20px;text-align:center;cursor:pointer;transition:var(--transition)}
-.upload-zone:hover,.upload-zone.dragover{border-color:var(--accent);background:var(--accent-glow)}
-.upload-icon{font-size:2rem;margin-bottom:6px}
-.upload-text{font-size:.8rem;color:var(--text-secondary);margin-bottom:4px}
-.upload-hint{font-size:.65rem;color:var(--text-muted)}
-.loaded-file-info{display:flex;align-items:center;gap:8px;padding:8px 12px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);border-radius:var(--radius-sm);margin-top:8px;font-size:.8rem;color:var(--text-secondary)}
-.file-badge{padding:2px 8px;border-radius:6px;font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
-.file-badge.gpx{background:rgba(99,102,241,.2);color:var(--accent-light)}
-.file-badge.xlsx{background:rgba(34,197,94,.2);color:var(--success)}
-.file-badge.json{background:rgba(245,158,11,.2);color:var(--warning)}
-.info-banner{padding:10px 14px;background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.2);border-radius:var(--radius-sm);font-size:.75rem;color:var(--text-secondary);line-height:1.5}
-.info-banner a{color:var(--accent-light);text-decoration:none}
-.leaflet-popup-content-wrapper{background:var(--bg-card)!important;color:var(--text-primary)!important;border:1px solid var(--border)!important;border-radius:var(--radius-sm)!important;box-shadow:var(--shadow)!important}
-.leaflet-popup-tip{background:var(--bg-card)!important;border:1px solid var(--border)!important}
-.leaflet-popup-content{font-family:'Inter',sans-serif!important;font-size:.8rem!important;line-height:1.5!important}
-.popup-title{font-weight:700;font-size:.9rem;margin-bottom:4px}
-.popup-badge{display:inline-block;padding:1px 8px;border-radius:12px;font-size:.65rem;font-weight:600;margin-right:4px}
-.popup-badge.gp{background:rgba(251,191,36,.15);color:var(--gp-gold)}
-.popup-badge.unpaved{background:rgba(251,146,60,.15);color:var(--unpaved-orange)}
-.popup-info{color:var(--text-secondary);font-size:.75rem}
-.spinner{display:inline-block;width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-.leaflet-control-zoom{border:1px solid var(--border)!important;border-radius:var(--radius-sm)!important;overflow:hidden}
-.leaflet-control-zoom a{background:var(--bg-card)!important;color:var(--text-primary)!important;border-color:var(--border)!important}
-@media(max-width:768px){.sidebar{position:fixed;right:-100%;width:100%;max-width:400px;transition:right .4s cubic-bezier(.4,0,.2,1)}.sidebar.open{right:0}.sidebar-toggle{display:flex!important}}
-.sidebar-toggle{display:none;position:fixed;top:16px;right:16px;z-index:1001;width:44px;height:44px;border-radius:50%;border:none;background:var(--bg-card);backdrop-filter:blur(12px);color:var(--text-primary);font-size:1.2rem;cursor:pointer;box-shadow:var(--shadow);align-items:center;justify-content:center}
+:root{--bg:#0f1117;--bg2:#1a1d2e;--card:rgba(26,29,46,.85);--glass:rgba(26,29,46,.65);--bdr:rgba(255,255,255,.08);--bdr-a:rgba(99,102,241,.4);--t1:#f1f5f9;--t2:#94a3b8;--t3:#64748b;--acc:#6366f1;--acc2:#818cf8;--glow:rgba(99,102,241,.15);--ok:#22c55e;--warn:#f59e0b;--err:#ef4444;--info:#3b82f6;--gold:#fbbf24;--unp:#fb923c;--r:12px;--rs:8px;--sh:0 4px 24px rgba(0,0,0,.3);--sw:400px;--tr:all .3s cubic-bezier(.4,0,.2,1)}
+*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--t1);overflow:hidden;height:100vh}
+.app{display:flex;height:100vh}#map{flex:1;height:100vh;z-index:1}
+.sb{width:var(--sw);height:100vh;background:var(--glass);backdrop-filter:blur(20px);border-left:1px solid var(--bdr);display:flex;flex-direction:column;z-index:1000;overflow:hidden}
+.sb-h{padding:20px 24px 16px;border-bottom:1px solid var(--bdr);background:linear-gradient(135deg,rgba(99,102,241,.1),rgba(6,182,212,.05))}
+.sb-h h1{font-size:1.5rem;font-weight:800;letter-spacing:-.03em;background:linear-gradient(135deg,var(--acc2),#06b6d4);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.sb-h .sub{font-size:.8rem;color:var(--t3)}
+.sb-c{flex:1;overflow-y:auto;padding:16px 20px;scrollbar-width:thin;scrollbar-color:var(--bdr) transparent}
+.cd{background:var(--card);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;margin-bottom:12px;transition:var(--tr)}
+.cd:hover{border-color:var(--bdr-a);box-shadow:0 0 20px var(--glow)}
+.ct{font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin-bottom:12px;display:flex;align-items:center;gap:6px}
+.sg{display:grid;grid-template-columns:1fr 1fr;gap:8px}.si{background:rgba(255,255,255,.03);border-radius:var(--rs);padding:10px 12px;text-align:center}
+.sv{font-size:1.3rem;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--acc2)}.sv.g{color:var(--gold)}.sv.u{color:var(--unp)}
+.sl{font-size:.65rem;color:var(--t3);text-transform:uppercase;letter-spacing:.06em;margin-top:2px}
+.lg{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}.li{display:flex;align-items:center;gap:4px;font-size:.65rem;color:var(--t3)}.ld{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+input[type=text],input[type=number]{width:100%;padding:10px 14px;background:rgba(255,255,255,.05);border:1px solid var(--bdr);border-radius:var(--rs);color:var(--t1);font-family:'Inter',sans-serif;font-size:.85rem;outline:none;transition:var(--tr)}
+input:focus{border-color:var(--acc);box-shadow:0 0 0 3px var(--glow)}input::placeholder{color:var(--t3)}
+.ig{margin-bottom:10px}.ig label{display:block;font-size:.7rem;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
+.btn{width:100%;padding:14px;border:none;border-radius:var(--rs);font-family:'Inter',sans-serif;font-weight:700;font-size:.85rem;cursor:pointer;transition:var(--tr);display:flex;align-items:center;justify-content:center;gap:8px}
+.btn-p{background:linear-gradient(135deg,var(--acc),#7c3aed);color:#fff}.btn-p:hover{opacity:.9;transform:translateY(-1px)}.btn-p:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.btn-s{background:rgba(255,255,255,.05);color:var(--t2);border:1px solid var(--bdr)}.btn-s:hover{background:rgba(255,255,255,.08)}
+.pg{height:6px;background:rgba(255,255,255,.05);border-radius:3px;margin-top:12px;overflow:hidden;display:none}
+.pgf{height:100%;background:linear-gradient(90deg,var(--acc),#06b6d4);border-radius:3px;transition:width .3s}.pgt{font-size:.7rem;color:var(--t3);margin-top:6px;display:none}
+.tg{display:flex;gap:4px;margin-bottom:8px}.tb{flex:1;padding:8px;border:1px solid var(--bdr);border-radius:var(--rs);background:transparent;color:var(--t2);font-family:'Inter';font-size:.7rem;font-weight:600;cursor:pointer;text-align:center;transition:var(--tr)}.tb.a{background:var(--acc);color:#fff;border-color:var(--acc)}
+.sc{position:relative}.scl{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--t3);font-size:.8rem;cursor:pointer;padding:4px;border-radius:50%}.scl:hover{color:var(--t1);background:rgba(255,255,255,.1)}
+.sco{font-size:.7rem;color:var(--t3);margin-top:6px}.sr{max-height:200px;overflow-y:auto;margin-top:6px;scrollbar-width:thin;scrollbar-color:var(--bdr) transparent}
+.sri{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:var(--rs);font-size:.8rem;cursor:pointer;transition:var(--tr);border-bottom:1px solid rgba(255,255,255,.03)}.sri:hover{background:rgba(99,102,241,.1)}
+.srn{font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--acc2);min-width:40px}.srd{flex:1;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sb2{font-size:.6rem;padding:1px 5px;border-radius:4px;font-weight:600}.sb2.gp{background:rgba(251,191,36,.15);color:var(--gold)}.sb2.up{background:rgba(251,146,60,.15);color:var(--unp)}
+.uz{border:2px dashed var(--bdr);border-radius:var(--rs);padding:16px;text-align:center;cursor:pointer;transition:var(--tr)}.uz:hover,.uz.dg{border-color:var(--acc);background:var(--glow)}
+.ui{font-size:1.8rem;margin-bottom:4px}.ut{font-size:.8rem;color:var(--t2)}.uh{font-size:.65rem;color:var(--t3)}
+.fi{display:flex;align-items:center;gap:8px;padding:8px 12px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);border-radius:var(--rs);margin-top:8px;font-size:.8rem;color:var(--t2)}
+.fb{padding:2px 8px;border-radius:6px;font-size:.65rem;font-weight:700;text-transform:uppercase}.fb.gpx{background:rgba(99,102,241,.2);color:var(--acc2)}.fb.xlsx{background:rgba(34,197,94,.2);color:var(--ok)}.fb.json{background:rgba(245,158,11,.2);color:var(--warn)}
+#res{display:none}.dc{border-left:3px solid var(--acc);padding:12px;margin-bottom:8px;border-radius:0 var(--rs) var(--rs) 0;background:rgba(255,255,255,.02);cursor:pointer}
+.dc .dh{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}.dc .dn{font-weight:700;font-size:.85rem}.dc .db{font-size:.7rem;padding:3px 8px;border-radius:12px;background:rgba(99,102,241,.15);color:var(--acc2);font-weight:600}
+.dc .ds{display:flex;flex-wrap:wrap;gap:8px;font-size:.7rem;color:var(--t3)}.dc .wl{display:none;margin-top:8px}.dc .wl.ex{display:block}
+.wi{display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:4px;font-size:.7rem;cursor:pointer;transition:var(--tr)}.wi:hover{background:rgba(99,102,241,.1)}
+.wd{width:8px;height:8px;border-radius:50%;flex-shrink:0}.wd.n{background:var(--info)}.wd.gp{background:var(--gold)}.wd.up{background:var(--unp)}.wd.al{background:var(--ok)}
+.wn{font-weight:600;color:var(--t1)}.wde{flex:1;color:var(--t3);font-size:.65rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.wk{font-family:'JetBrains Mono';font-size:.6rem;color:var(--t3)}
+.wb{font-size:.6rem;padding:1px 5px;border-radius:4px;font-weight:600;background:rgba(251,146,60,.15);color:var(--unp)}
+.leaflet-popup-content-wrapper{background:var(--card)!important;color:var(--t1)!important;border:1px solid var(--bdr)!important;border-radius:var(--rs)!important;box-shadow:var(--sh)!important}
+.leaflet-popup-tip{background:var(--card)!important;border:1px solid var(--bdr)!important}.leaflet-popup-content{font-family:'Inter'!important;font-size:.8rem!important;line-height:1.5!important}
+.pt{font-weight:700;font-size:.9rem;margin-bottom:4px}.pi{color:var(--t2);font-size:.75rem}
+.leaflet-control-zoom{border:1px solid var(--bdr)!important;border-radius:var(--rs)!important;overflow:hidden}.leaflet-control-zoom a{background:var(--card)!important;color:var(--t1)!important;border-color:var(--bdr)!important}
+@media(max-width:768px){.sb{position:fixed;right:-100%;width:100%;max-width:400px;transition:right .4s}.sb.open{right:0}.sbt{display:flex!important}}
+.sbt{display:none;position:fixed;top:16px;right:16px;z-index:1001;width:44px;height:44px;border-radius:50%;border:none;background:var(--card);color:var(--t1);font-size:1.2rem;cursor:pointer;box-shadow:var(--sh);align-items:center;justify-content:center}
+.spin{display:inline-block;width:16px;height:16px;border:2px solid var(--bdr);border-top-color:var(--acc);border-radius:50%;animation:sp .8s linear infinite}@keyframes sp{to{transform:rotate(360deg)}}
     </style>
 </head>
 <body>
-    <div class="app-container">
-        <div id="map"></div>
-        <button class="sidebar-toggle" id="sidebar-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
-        <div class="sidebar">
-            <div class="sidebar-header">
-                <h1>CENTOPASSI® 2026</h1>
-                <div class="subtitle">Mappa Waypoints — Visualizzatore</div>
+<div class="app">
+    <div id="map"></div>
+    <button class="sbt" onclick="document.querySelector('.sb').classList.toggle('open')">☰</button>
+    <div class="sb">
+        <div class="sb-h"><h1>CENTOPASSI® 2026</h1><div class="sub">Route Planner</div></div>
+        <div class="sb-c">
+            <!-- Upload -->
+            <div class="cd"><div class="ct">📂 Carica Waypoints</div>
+                <div id="uz" class="uz" ondragover="event.preventDefault();this.classList.add('dg')" ondragleave="this.classList.remove('dg')" ondrop="handleDrop(event)" onclick="document.getElementById('fi').click()">
+                    <input type="file" id="fi" accept=".gpx,.json" style="display:none" onchange="handleFile(this.files[0])">
+                    <div class="ui">📂</div><div class="ut">Trascina <b>.GPX</b> o <b>.JSON</b></div><div class="uh">oppure clicca per sfogliare</div>
+                </div>
+                <div id="finfo" class="fi" style="display:none"><span class="fb" id="fbadge">JSON</span><span id="fname">—</span></div>
             </div>
-            <div class="sidebar-content">
-                <!-- Upload -->
-                <div class="card">
-                    <div class="card-title"><span class="icon">📂</span> Carica Waypoints</div>
-                    <div id="upload-zone" class="upload-zone"
-                         ondragover="event.preventDefault();this.classList.add('dragover')"
-                         ondragleave="this.classList.remove('dragover')"
-                         ondrop="handleDrop(event)"
-                         onclick="document.getElementById('file-input').click()">
-                        <input type="file" id="file-input" accept=".gpx,.json" style="display:none" onchange="handleFile(this.files[0])">
-                        <div class="upload-icon">📂</div>
-                        <div class="upload-text">Trascina un file <b>.GPX</b> o <b>.JSON</b></div>
-                        <div class="upload-hint">oppure clicca per sfogliare</div>
+            <!-- Stats -->
+            <div class="cd"><div class="ct">📊 Statistiche</div>
+                <div class="sg">
+                    <div class="si"><div class="sv" id="st">—</div><div class="sl">Totali</div></div>
+                    <div class="si"><div class="sv g" id="sgp">—</div><div class="sl">Golden</div></div>
+                    <div class="si"><div class="sv u" id="su">—</div><div class="sl">Sterrati</div></div>
+                    <div class="si"><div class="sv" id="se">—</div><div class="sl">Quota Max</div></div>
+                </div>
+                <div class="lg"><div class="li"><div class="ld" style="background:#3b82f6"></div>Normale</div><div class="li"><div class="ld" style="background:#fbbf24"></div>Golden</div><div class="li"><div class="ld" style="background:#fb923c"></div>Sterrato</div><div class="li"><div class="ld" style="background:#22c55e"></div>Alternativo</div></div>
+            </div>
+            <!-- Search -->
+            <div class="cd"><div class="ct">🔍 Cerca Waypoint</div>
+                <div class="sc"><input type="text" id="qs" placeholder="Numero, nome, città..." oninput="searchWP(this.value)" autocomplete="off"><button class="scl" id="qcl" onclick="clrSearch()" style="display:none">✕</button></div>
+                <div id="qco" class="sco" style="display:none"></div><div id="qr" class="sr"></div>
+            </div>
+            <!-- Finish -->
+            <div class="cd"><div class="ct">🏁 Punto di Arrivo</div>
+                <div class="ig"><label>Nome</label><input type="text" id="fn" value="Traguardo" placeholder="Città arrivo"></div>
+                <div class="ig"><label>Latitudine</label><input type="number" id="flat" step="0.0001" placeholder="es. 43.1234"></div>
+                <div class="ig"><label>Longitudine</label><input type="number" id="flon" step="0.0001" placeholder="es. 11.5678"></div>
+                <button class="btn btn-s" onclick="enableSetFinish()" style="margin-bottom:8px">📍 Clicca sulla mappa</button>
+            </div>
+            <!-- Optimize -->
+            <div class="cd"><div class="ct">🛣️ Ottimizzazione</div>
+                <div class="ig"><label>Sterrati</label>
+                    <div class="tg"><button class="tb" data-u="allow" onclick="setU('allow')">Consenti</button><button class="tb a" data-u="limit" onclick="setU('limit')">Limita</button><button class="tb" data-u="exclude" onclick="setU('exclude')">Escludi</button></div>
+                </div>
+                <div id="mug" class="ig"><label>Max sterrati: <span id="muv">10</span></label><input type="range" min="0" max="30" value="10" id="mus" oninput="document.getElementById('muv').textContent=this.value" style="width:100%"></div>
+                <button class="btn btn-p" id="bopt" onclick="runOptimize()">🚀 Calcola Percorso</button>
+                <div class="pg" id="pg"><div class="pgf" id="pgf"></div></div>
+                <div class="pgt" id="pgt"></div>
+            </div>
+            <!-- Results -->
+            <div id="res">
+                <div class="cd"><div class="ct">🏆 Punteggio</div>
+                    <div class="sg">
+                        <div class="si"><div class="sv" id="rsc" style="font-size:1.1rem">—</div><div class="sl">Totale</div></div>
+                        <div class="si"><div class="sv" id="rkm" style="font-size:1rem">—</div><div class="sl">Km Totali</div></div>
                     </div>
-                    <div id="loaded-file-info" class="loaded-file-info" style="display:none">
-                        <span class="file-badge" id="file-badge">JSON</span>
-                        <span id="loaded-filename">—</span>
+                    <div style="font-size:.7rem;color:var(--t3);margin-top:8px">
+                        <div>Passi: <span id="rsp">—</span></div><div>Golden: <span id="rsg">—</span></div>
+                        <div>Dislivello: <span id="rse">—</span></div><div>Bonus 100°: <span id="rsb">—</span></div>
                     </div>
                 </div>
-
-                <!-- Stats -->
-                <div class="card">
-                    <div class="card-title"><span class="icon">📊</span> Statistiche Waypoint</div>
-                    <div class="stats-grid">
-                        <div class="stat-item"><div class="stat-value" id="stat-total">—</div><div class="stat-label">Waypoint Totali</div></div>
-                        <div class="stat-item"><div class="stat-value gold" id="stat-gp">—</div><div class="stat-label">Golden Points</div></div>
-                        <div class="stat-item"><div class="stat-value unpaved" id="stat-unpaved">—</div><div class="stat-label">Sterrati</div></div>
-                        <div class="stat-item"><div class="stat-value" id="stat-elevation">—</div><div class="stat-label">Quota Max</div></div>
-                    </div>
-                    <div class="legend">
-                        <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div> Normale</div>
-                        <div class="legend-item"><div class="legend-dot" style="background:#fbbf24"></div> Golden Point</div>
-                        <div class="legend-item"><div class="legend-dot" style="background:#fb923c"></div> Sterrato</div>
-                    </div>
-                </div>
-
-                <!-- Search -->
-                <div class="card">
-                    <div class="card-title"><span class="icon">🔍</span> Cerca Waypoint</div>
-                    <div class="search-container">
-                        <input type="text" id="wp-search" placeholder="Cerca per numero, nome, città..." oninput="searchWP(this.value)" autocomplete="off">
-                        <button class="search-clear" id="search-clear" onclick="clearSearch()" style="display:none">✕</button>
-                    </div>
-                    <div id="search-count" class="search-count" style="display:none"></div>
-                    <div id="search-results" class="search-results"></div>
-                </div>
-
-                <!-- Info -->
-                <div class="card">
-                    <div class="card-title"><span class="icon">ℹ️</span> Informazioni</div>
-                    <div class="info-banner">
-                        Questa è la versione visualizzatore (solo mappa).<br>
-                        Per l'<b>ottimizzazione percorso</b>, esegui l'app completa in locale:<br>
-                        <code>python app.py</code> → <a href="http://localhost:5000">localhost:5000</a>
-                    </div>
-                </div>
+                <div class="cd"><div class="ct">📅 Giorni</div><div id="days"></div></div>
+                <button class="btn btn-s" onclick="exportGPX()" style="margin-top:8px">💾 Scarica GPX</button>
             </div>
         </div>
     </div>
-
+</div>
 <script>
-// ── State ───────────────────────────────────────────────────
-let map, allWaypoints = [], markers = [], highlights = [];
-let debounce = null;
+const DAY_COL=['#6366f1','#06b6d4','#f59e0b','#ef4444'],DAY_N=['Giorno 1 (Ven)','Giorno 2 (Sab)','Giorno 3 (Dom)','Giorno 4 (Lun)'];
+let map,allWP=[],markers=[],highlights=[],routeLayers=[],routeResult=null,uMode='limit',settingFinish=false,dbTmr=null;
 
-// ── Init ────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-    map = L.map('map', {
-        center: [42.5, 12.5],
-        zoom: 6,
-        zoomControl: true,
-    });
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '© OpenStreetMap © CARTO',
-        maxZoom: 19,
-    }).addTo(map);
-
-    // Load pre-exported waypoints
-    fetch('waypoints.json')
-        .then(r => r.json())
-        .then(data => loadWaypoints(data, 'waypoints.json'))
-        .catch(() => console.log('No pre-loaded waypoints'));
+document.addEventListener('DOMContentLoaded',()=>{
+    map=L.map('map',{center:[42.5,12.5],zoom:6});
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{attribution:'© OSM © CARTO',maxZoom:19}).addTo(map);
+    map.on('click',e=>{if(settingFinish){document.getElementById('flat').value=e.latlng.lat.toFixed(5);document.getElementById('flon').value=e.latlng.lng.toFixed(5);settingFinish=false;map.getContainer().style.cursor=''}});
+    fetch('waypoints.json').then(r=>r.json()).then(d=>loadWP(d,'waypoints.json')).catch(()=>{});
 });
 
-// ── Load Waypoints ──────────────────────────────────────────
-function loadWaypoints(data, filename) {
-    allWaypoints = data;
-    markers.forEach(m => map.removeLayer(m));
-    markers = [];
-
-    data.forEach(wp => {
-        const color = wp.is_golden_point ? '#fbbf24' : (wp.is_unpaved ? '#fb923c' : '#3b82f6');
-        const m = L.circleMarker([wp.lat, wp.lon], {
-            radius: wp.is_golden_point ? 7 : 5,
-            fillColor: color, fillOpacity: 0.8,
-            color: '#fff', weight: 1.5, opacity: 0.4,
-        });
-        m.wpData = wp;
-        m.bindPopup(`
-            <div class="popup-title">WP ${wp.number || wp.name} ${wp.is_golden_point ? '⭐' : ''}</div>
-            ${wp.is_golden_point ? '<span class="popup-badge gp">Golden Point</span>' : ''}
-            ${wp.is_unpaved ? '<span class="popup-badge unpaved">Sterrato</span>' : ''}
-            <div class="popup-info">
-                ${wp.city ? `<div>🏘️ ${wp.city}${wp.province ? ` (${wp.province})` : ''}</div>` : ''}
-                ${wp.description ? `<div>📍 ${wp.description.substring(0, 60)}</div>` : ''}
-                <div>📐 ${(wp.elevation||0).toFixed(0)}m | 🗺️ ${wp.lat.toFixed(4)}, ${wp.lon.toFixed(4)}</div>
-            </div>
-        `);
-        m.addTo(map);
-        markers.push(m);
+function loadWP(data,name){
+    allWP=data;markers.forEach(m=>map.removeLayer(m));markers=[];
+    data.forEach(wp=>{
+        const c=wp.is_golden_point?'#fbbf24':(wp.is_unpaved?'#fb923c':'#3b82f6');
+        const m=L.circleMarker([wp.lat,wp.lon],{radius:wp.is_golden_point?7:5,fillColor:c,fillOpacity:.8,color:'#fff',weight:1.5,opacity:.4});
+        m.wp=wp;m.bindPopup(`<div class="pt">WP ${wp.number} ${wp.is_golden_point?'⭐':''}</div>${wp.is_golden_point?'<span style="background:rgba(251,191,36,.15);color:#fbbf24;padding:1px 6px;border-radius:8px;font-size:.65rem;font-weight:600">GP</span>':''}${wp.is_unpaved?'<span style="background:rgba(251,146,60,.15);color:#fb923c;padding:1px 6px;border-radius:8px;font-size:.65rem;font-weight:600;margin-left:4px">Sterrato</span>':''}<div class="pi">${wp.city?`🏘️ ${wp.city} `:''}${wp.description?`📍 ${wp.description.substring(0,50)}`:''}${'<br>📐 '+(wp.elevation||0).toFixed(0)+'m'}</div>`);
+        m.addTo(map);markers.push(m);
     });
+    if(data.length)map.fitBounds(L.latLngBounds(data.map(w=>[w.lat,w.lon])),{padding:[40,40]});
+    document.getElementById('st').textContent=data.length;
+    document.getElementById('sgp').textContent=data.filter(w=>w.is_golden_point).length;
+    document.getElementById('su').textContent=data.filter(w=>w.is_unpaved).length;
+    document.getElementById('se').textContent=Math.max(...data.map(w=>w.elevation||0)).toFixed(0)+'m';
+    showFile(name);
+}
+function showFile(n){const e=n.split('.').pop().toLowerCase();document.getElementById('fbadge').textContent=e.toUpperCase();document.getElementById('fbadge').className='fb '+e;document.getElementById('fname').textContent=n;document.getElementById('finfo').style.display='flex'}
+function handleDrop(ev){ev.preventDefault();ev.target.closest('.uz').classList.remove('dg');handleFile(ev.dataTransfer.files[0])}
+function handleFile(f){if(!f)return;const ext=f.name.split('.').pop().toLowerCase(),r=new FileReader();
+    if(ext==='json'){r.onload=e=>{try{loadWP(JSON.parse(e.target.result),f.name)}catch(er){alert('Errore: '+er.message)}};r.readAsText(f)}
+    else if(ext==='gpx'){r.onload=e=>{try{loadWP(parseGPXFile(e.target.result),f.name)}catch(er){alert('Errore: '+er.message)}};r.readAsText(f)}
+    else alert('Formato non supportato')}
+function parseGPXFile(xml){const p=new DOMParser(),d=p.parseFromString(xml,'text/xml'),ns='http://www.topografix.com/GPX/1/1',wpts=d.getElementsByTagNameNS(ns,'wpt'),out=[];
+    for(let i=0;i<wpts.length;i++){const w=wpts[i],lat=+w.getAttribute('lat'),lon=+w.getAttribute('lon'),nEl=w.getElementsByTagNameNS(ns,'name')[0],name=nEl?nEl.textContent.trim():''+(i+1),eEl=w.getElementsByTagNameNS(ns,'ele')[0],elev=eEl?+eEl.textContent:0,cEl=w.getElementsByTagNameNS(ns,'cmt')[0],dEl=w.getElementsByTagNameNS(ns,'desc')[0],desc=(cEl?cEl.textContent:(dEl?dEl.textContent:'')).trim(),num=name.split(' ')[0],gp=name.toUpperCase().includes('GP'),dl=desc.toLowerCase(),up=['bridleway','track','dirt','sterrato','sentiero','mulattiera','trail'].some(k=>dl.includes(k));
+    out.push({id:i,name,number:num,lat,lon,elevation:elev,description:desc,city:'',province:'',is_golden_point:gp,is_unpaved:up,road_type:'',display_name:`WP ${num}${gp?' ⭐ GP':''}`})}
+    out.sort((a,b)=>(parseInt(a.number)||9999)-(parseInt(b.number)||9999));out.forEach((w,i)=>w.id=i);return out}
 
-    // Fit bounds
-    if (data.length > 0) {
-        const bounds = L.latLngBounds(data.map(w => [w.lat, w.lon]));
-        map.fitBounds(bounds, { padding: [40, 40] });
-    }
+// Search
+function searchWP(q){clearTimeout(dbTmr);dbTmr=setTimeout(()=>doSearch(q),200)}
+function doSearch(q){highlights.forEach(l=>map.removeLayer(l));highlights=[];markers.forEach(m=>m.setStyle({opacity:.4,fillOpacity:.8}));q=(q||'').trim().toLowerCase();
+    if(!q){document.getElementById('qr').innerHTML='';document.getElementById('qco').style.display='none';document.getElementById('qcl').style.display='none';return}
+    document.getElementById('qcl').style.display='block';
+    const m=allWP.filter(w=>[w.number,w.name,w.description,w.city,w.province,w.display_name].some(f=>(f||'').toLowerCase().includes(q)));
+    document.getElementById('qco').style.display='block';document.getElementById('qco').textContent=m.length+' risultat'+(m.length===1?'o':'i');
+    if(m.length&&m.length<allWP.length){const ids=new Set(m.map(x=>x.id));markers.forEach(mk=>mk.setStyle(ids.has(mk.wp.id)?{opacity:1,fillOpacity:1}:{opacity:.08,fillOpacity:.08}))}
+    document.getElementById('qr').innerHTML=m.slice(0,25).map(w=>`<div class="sri" onclick="map.setView([${w.lat},${w.lon}],15);markers.find(x=>x.wp.id===${w.id})?.openPopup()"><span class="srn">WP ${w.number}</span><span class="srd">${w.city||w.description?.substring(0,30)||''}</span>${w.is_golden_point?'<span class="sb2 gp">GP</span>':''}${w.is_unpaved?'<span class="sb2 up">🔶</span>':''}</div>`).join('')+(m.length>25?`<div class="sco" style="padding:6px;text-align:center">...e altri ${m.length-25}</div>`:'');
+    m.forEach(w=>{const r=L.circleMarker([w.lat,w.lon],{radius:14,fillColor:'transparent',fillOpacity:0,color:'#6366f1',weight:2,opacity:.8}).addTo(map);highlights.push(r)});
+    if(m.length>1&&m.length<=50)map.fitBounds(L.latLngBounds(m.map(w=>[w.lat,w.lon])),{padding:[60,60],maxZoom:12});else if(m.length===1)map.setView([m[0].lat,m[0].lon],13)}
+function clrSearch(){document.getElementById('qs').value='';searchWP('')}
 
-    // Stats
-    document.getElementById('stat-total').textContent = data.length;
-    document.getElementById('stat-gp').textContent = data.filter(w => w.is_golden_point).length;
-    document.getElementById('stat-unpaved').textContent = data.filter(w => w.is_unpaved).length;
-    const elevs = data.map(w => w.elevation || 0);
-    document.getElementById('stat-elevation').textContent = `${Math.max(...elevs).toFixed(0)}m`;
+// Finish
+function enableSetFinish(){settingFinish=true;map.getContainer().style.cursor='crosshair'}
+function setU(mode){uMode=mode;document.querySelectorAll('.tb[data-u]').forEach(b=>b.classList.toggle('a',b.dataset.u===mode));document.getElementById('mug').style.display=mode==='limit'?'block':'none'}
 
-    // Show file info
-    showFile(filename);
+// Optimize
+function runOptimize(){
+    const fLat=parseFloat(document.getElementById('flat').value),fLon=parseFloat(document.getElementById('flon').value),fName=document.getElementById('fn').value||'Traguardo';
+    if(isNaN(fLat)||isNaN(fLon)){alert('Imposta il punto di arrivo!');return}
+    if(!allWP.length){alert('Carica prima i waypoints!');return}
+    const btn=document.getElementById('bopt');btn.disabled=true;btn.innerHTML='<span class="spin"></span> Calcolo...';
+    const pg=document.getElementById('pg'),pgf=document.getElementById('pgf'),pgt=document.getElementById('pgt');pg.style.display='block';pgt.style.display='block';
+    const maxU=parseInt(document.getElementById('mus').value)||10;
+    setTimeout(()=>{try{
+        const route=optimizeRoute(allWP,fLat,fLon,fName,uMode,maxU,(msg,pct)=>{pgf.style.width=pct+'%';pgt.textContent=msg});
+        routeResult=route;displayRoute(route);
+    }catch(e){alert('Errore: '+e.message)}
+    btn.disabled=false;btn.innerHTML='🚀 Calcola Percorso'},50);
 }
 
-function showFile(name) {
-    const ext = name.split('.').pop().toLowerCase();
-    document.getElementById('file-badge').textContent = ext.toUpperCase();
-    document.getElementById('file-badge').className = `file-badge ${ext}`;
-    document.getElementById('loaded-filename').textContent = name;
-    document.getElementById('loaded-file-info').style.display = 'flex';
+function displayRoute(route){
+    routeLayers.forEach(l=>map.removeLayer(l));routeLayers=[];markers.forEach(m=>m.setStyle({opacity:.15,fillOpacity:.15}));
+    route.days.forEach((day,idx)=>{const col=DAY_COL[idx];
+        day.segments.forEach(s=>{const pl=L.polyline(s.geometry,{color:s.isUnpaved?'#fb923c':col,weight:s.isUnpaved?4:3,opacity:s.isUnpaved?.9:.7,dashArray:s.isUnpaved?'8 6':null}).addTo(map);routeLayers.push(pl)});
+        day.waypoints.forEach(wp=>{const m=L.circleMarker([wp.lat,wp.lon],{radius:wp.is_golden_point?8:6,fillColor:wp.is_golden_point?'#fbbf24':col,fillOpacity:.9,color:'#fff',weight:2,opacity:.8}).bindPopup(`<div class="pt">WP ${wp.number} ${wp.is_golden_point?'⭐':''}</div><div class="pi">📅 ${DAY_N[idx]}${wp.description?'<br>📍 '+wp.description.substring(0,40):''}<br>📐 ${(wp.elevation||0).toFixed(0)}m</div>`).addTo(map);routeLayers.push(m)});
+        if(idx===0&&day.waypoints.length){const w=day.waypoints[0],ic=L.divIcon({html:'<div style="font-size:24px;text-shadow:0 2px 8px rgba(0,0,0,.5)">🟢</div>',iconSize:[28,28],iconAnchor:[14,14],className:''});routeLayers.push(L.marker([w.lat,w.lon],{icon:ic}).addTo(map).bindPopup(`<div class="pt">🟢 Partenza</div>WP ${w.number}`))}
+    });
+    (route.alternatives||[]).forEach(wp=>{const m=L.circleMarker([wp.lat,wp.lon],{radius:7,fillColor:'#22c55e',fillOpacity:.7,color:'#fff',weight:2,opacity:.8}).bindPopup(`<div class="pt">🟢 ALT WP ${wp.number}</div><div style="background:rgba(34,197,94,.15);color:#22c55e;padding:1px 6px;border-radius:8px;font-size:.65rem;font-weight:600;display:inline-block">ALTERNATIVO</div><div class="pi">${wp.description?'📍 '+wp.description.substring(0,40):''}<br>📐 ${(wp.elevation||0).toFixed(0)}m</div>`).addTo(map);routeLayers.push(m)});
+    const ac=[];route.days.forEach(d=>d.waypoints.forEach(w=>ac.push([w.lat,w.lon])));if(ac.length)map.fitBounds(L.latLngBounds(ac),{padding:[50,50]});
+    showResults(route);
 }
 
-// ── File Upload (client-side) ───────────────────────────────
-function handleDrop(e) {
-    e.preventDefault();
-    e.target.closest('.upload-zone').classList.remove('dragover');
-    handleFile(e.dataTransfer.files[0]);
+function showResults(route){
+    document.getElementById('res').style.display='block';
+    const sc=calculateScore(route);
+    document.getElementById('rsc').textContent=sc.total.toLocaleString();document.getElementById('rkm').textContent=route.totalKm.toFixed(0)+' km';
+    document.getElementById('rsp').textContent=`${sc.regularCount}×5000 = ${sc.passPoints.toLocaleString()}`;
+    document.getElementById('rsg').textContent=`${sc.gpCount}×${sc.reached100?'15000':'5000'} = ${sc.gpPoints.toLocaleString()}`;
+    document.getElementById('rse').textContent=sc.elevPoints.toLocaleString();document.getElementById('rsb').textContent=sc.bonus>0?'+'+sc.bonus.toLocaleString():'—';
+    const dc=document.getElementById('days');dc.innerHTML='';
+    route.days.forEach((day,idx)=>{const d=document.createElement('div');d.className='dc';d.style.borderLeftColor=DAY_COL[idx];
+        d.innerHTML=`<div class="dh"><span class="dn">${DAY_N[idx]}</span><span class="db">${day.totalKm.toFixed(0)} km</span></div><div class="ds"><span>🗺️ ${day.waypoints.length} WP</span><span>⭐ ${day.waypoints.filter(w=>w.is_golden_point).length} GP</span><span>⏱️ ${day.totalHours.toFixed(1)}h</span><span>⏰ ${day.startTime}–${day.endTime}</span>${day.unpavedSegs?'<span class="wb">🔶 '+day.unpavedSegs+' sterr.</span>':''}</div><div class="wl" id="wl${idx}">${day.waypoints.map((w,i)=>`<div class="wi" onclick="map.setView([${w.lat},${w.lon}],14)"><span class="wd ${w.is_golden_point?'gp':(w.is_unpaved?'up':'n')}"></span><span class="wn">WP ${w.number}</span><span class="wde">${w.description?.substring(0,25)||''}</span>${i>0&&day.segments[i-1]?`<span class="wk">${day.segments[i-1].distanceKm.toFixed(0)}km</span>`:''}</div>`).join('')}</div>`;
+        d.onclick=e=>{if(!e.target.closest('.wi'))d.querySelector('.wl').classList.toggle('ex')};dc.appendChild(d)});
+    if(route.alternatives?.length){const d=document.createElement('div');d.className='dc';d.style.borderLeftColor='#22c55e';
+        d.innerHTML=`<div class="dh"><span class="dn">🟢 Alternativi</span><span class="db" style="background:rgba(34,197,94,.15);color:#22c55e">${route.alternatives.length} WP</span></div><div class="ds"><span>Di riserva</span></div><div class="wl" id="wlalt">${route.alternatives.map(w=>`<div class="wi" onclick="map.setView([${w.lat},${w.lon}],14)"><span class="wd al"></span><span class="wn">ALT ${w.number}</span><span class="wde">${w.description?.substring(0,25)||''}</span></div>`).join('')}</div>`;
+        d.onclick=e=>{if(!e.target.closest('.wi'))d.querySelector('.wl').classList.toggle('ex')};dc.appendChild(d)}
 }
 
-function handleFile(file) {
-    if (!file) return;
-    const ext = file.name.split('.').pop().toLowerCase();
-    const reader = new FileReader();
-
-    if (ext === 'json') {
-        reader.onload = e => {
-            try { loadWaypoints(JSON.parse(e.target.result), file.name); }
-            catch(err) { alert('Errore JSON: ' + err.message); }
-        };
-        reader.readAsText(file);
-    } else if (ext === 'gpx') {
-        reader.onload = e => {
-            try { loadWaypoints(parseGPX(e.target.result), file.name); }
-            catch(err) { alert('Errore GPX: ' + err.message); }
-        };
-        reader.readAsText(file);
-    } else {
-        alert('Formato non supportato. Usare .GPX o .JSON');
-    }
-}
-
-function parseGPX(xml) {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(xml, 'text/xml');
-    const ns = 'http://www.topografix.com/GPX/1/1';
-    const wpts = doc.getElementsByTagNameNS(ns, 'wpt');
-    const data = [];
-    for (let i = 0; i < wpts.length; i++) {
-        const w = wpts[i];
-        const lat = parseFloat(w.getAttribute('lat'));
-        const lon = parseFloat(w.getAttribute('lon'));
-        const nameEl = w.getElementsByTagNameNS(ns, 'name')[0];
-        const name = nameEl ? nameEl.textContent.trim() : `${i+1}`;
-        const eleEl = w.getElementsByTagNameNS(ns, 'ele')[0];
-        const elevation = eleEl ? parseFloat(eleEl.textContent) : 0;
-        const cmtEl = w.getElementsByTagNameNS(ns, 'cmt')[0];
-        const descEl = w.getElementsByTagNameNS(ns, 'desc')[0];
-        const description = (cmtEl ? cmtEl.textContent : (descEl ? descEl.textContent : '')).trim();
-        const number = name.split(' ')[0];
-        const is_golden_point = name.toUpperCase().includes('GP');
-        const descLower = description.toLowerCase();
-        const is_unpaved = ['bridleway','track','dirt','sterrato','sentiero','mulattiera','trail'].some(k => descLower.includes(k));
-        data.push({ id: i, name, number, lat, lon, elevation, description, city:'', province:'', is_golden_point, is_unpaved, road_type:'', display_name: `WP ${number}${is_golden_point ? ' ⭐ GP' : ''}` });
-    }
-    data.sort((a,b) => { const na=parseInt(a.number)||9999, nb=parseInt(b.number)||9999; return na-nb; });
-    data.forEach((w,i) => w.id = i);
-    return data;
-}
-
-// ── Search ───────────────────────────────────────────────────
-function searchWP(q) { clearTimeout(debounce); debounce = setTimeout(() => doSearch(q), 200); }
-
-function doSearch(q) {
-    highlights.forEach(l => map.removeLayer(l)); highlights = [];
-    markers.forEach(m => m.setStyle({ opacity: 0.4, fillOpacity: 0.8 }));
-    q = (q||'').trim().toLowerCase();
-    const clearBtn = document.getElementById('search-clear');
-    const countDiv = document.getElementById('search-count');
-    const resultsDiv = document.getElementById('search-results');
-
-    if (!q) { resultsDiv.innerHTML = ''; countDiv.style.display = 'none'; clearBtn.style.display = 'none'; return; }
-    clearBtn.style.display = 'block';
-
-    const matches = allWaypoints.filter(w => [w.number,w.name,w.description,w.city,w.province,w.display_name].some(f => (f||'').toLowerCase().includes(q)));
-    countDiv.style.display = 'block';
-    countDiv.textContent = `${matches.length} risultat${matches.length===1?'o':'i'}`;
-
-    if (matches.length > 0 && matches.length < allWaypoints.length) {
-        const ids = new Set(matches.map(m => m.id));
-        markers.forEach(m => m.setStyle(ids.has(m.wpData.id) ? {opacity:1,fillOpacity:1} : {opacity:.08,fillOpacity:.08}));
-    }
-
-    resultsDiv.innerHTML = matches.slice(0,25).map(w => {
-        let badges = '';
-        if (w.is_golden_point) badges += '<span class="sr-badge gp">GP</span>';
-        if (w.is_unpaved) badges += '<span class="sr-badge unpaved">🔶</span>';
-        return `<div class="search-result-item" onclick="map.setView([${w.lat},${w.lon}],15,{animate:true});markers.find(m=>m.wpData.id===${w.id})?.openPopup()"><span class="sr-number">WP ${w.number}</span><span class="sr-desc">${w.city||w.description?.substring(0,30)||''}</span>${badges}</div>`;
-    }).join('') + (matches.length>25 ? `<div class="search-count" style="padding:6px;text-align:center">...e altri ${matches.length-25}</div>` : '');
-
-    matches.forEach(w => { const r = L.circleMarker([w.lat,w.lon],{radius:14,fillColor:'transparent',fillOpacity:0,color:'#6366f1',weight:2,opacity:.8}).addTo(map); highlights.push(r); });
-    if (matches.length>1 && matches.length<=50) map.fitBounds(L.latLngBounds(matches.map(w=>[w.lat,w.lon])),{padding:[60,60],maxZoom:12});
-    else if (matches.length===1) map.setView([matches[0].lat,matches[0].lon],13,{animate:true});
-}
-
-function clearSearch() { document.getElementById('wp-search').value=''; searchWP(''); }
+function exportGPX(){if(!routeResult)return alert('Calcola prima il percorso!');downloadGPXFile(routeResult)}
 </script>
 </body>
 </html>
