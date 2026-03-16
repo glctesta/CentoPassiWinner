@@ -102,6 +102,10 @@ input:focus{border-color:var(--acc);box-shadow:0 0 0 3px var(--glow)}input::plac
                     <div class="tg"><button class="tb" data-u="allow" onclick="setU('allow')">Consenti</button><button class="tb a" data-u="limit" onclick="setU('limit')">Limita</button><button class="tb" data-u="exclude" onclick="setU('exclude')">Escludi</button></div>
                 </div>
                 <div id="mug" class="ig"><label>Max sterrati: <span id="muv">10</span></label><input type="range" min="0" max="30" value="10" id="mus" oninput="document.getElementById('muv').textContent=this.value" style="width:100%"></div>
+                <div class="ig" style="display:flex;align-items:center;gap:8px">
+                    <input type="checkbox" id="use-osrm" style="width:auto;accent-color:var(--acc)">
+                    <label for="use-osrm" style="text-transform:none;letter-spacing:0;font-size:.75rem;color:var(--t2);cursor:pointer">🛰️ Usa routing OSRM reale (più lento, più preciso)</label>
+                </div>
                 <button class="btn btn-p" id="bopt" onclick="runOptimize()">🚀 Calcola Percorso</button>
                 <div class="pg" id="pg"><div class="pgf" id="pgf"></div></div>
                 <div class="pgt" id="pgt"></div>
@@ -186,8 +190,9 @@ function runOptimize(){
     const btn=document.getElementById('bopt');btn.disabled=true;btn.innerHTML='<span class="spin"></span> Calcolo...';
     const pg=document.getElementById('pg'),pgf=document.getElementById('pgf'),pgt=document.getElementById('pgt');pg.style.display='block';pgt.style.display='block';
     const maxU=parseInt(document.getElementById('mus').value)||10;
-    setTimeout(()=>{try{
-        const route=optimizeRoute(allWP,fLat,fLon,fName,uMode,maxU,(msg,pct)=>{pgf.style.width=pct+'%';pgt.textContent=msg});
+    const useOsrm=document.getElementById('use-osrm').checked;
+    setTimeout(async()=>{try{
+        const route=await optimizeRouteAsync(allWP,fLat,fLon,fName,uMode,maxU,useOsrm,(msg,pct)=>{if(pct>=0)pgf.style.width=pct+'%';pgt.textContent=msg});
         routeResult=route;displayRoute(route);
     }catch(e){alert('Errore: '+e.message)}
     btn.disabled=false;btn.innerHTML='🚀 Calcola Percorso'},50);

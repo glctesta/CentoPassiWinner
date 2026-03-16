@@ -34,6 +34,63 @@ function estimateDistance(wp1, wp2) {
     return haversineKm(wp1.lat, wp1.lon, wp2.lat, wp2.lon) * CONFIG.HAVERSINE_ROAD_FACTOR;
 }
 
+// ── OSRM Routing ────────────────────────────────────────────
+
+const OSRM_BASE = 'https://router.project-osrm.org';
+let _osrmCache = {};
+
+async function queryOSRM(wp1, wp2) {
+    const key = `${wp1.lat.toFixed(5)},${wp1.lon.toFixed(5)}|${wp2.lat.toFixed(5)},${wp2.lon.toFixed(5)}`;
+    if (_osrmCache[key]) return _osrmCache[key];
+    try {
+        const url = `${OSRM_BASE}/route/v1/car/${wp1.lon},${wp1.lat};${wp2.lon},${wp2.lat}?overview=simplified&geometries=geojson&exclude=motorway`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.code === 'Ok' && data.routes && data.routes.length) {
+            const r = data.routes[0];
+            const geom = (r.geometry?.coordinates || []).map(c => [c[1], c[0]]);
+            const result = { distanceKm: r.distance / 1000, durationHours: r.duration / 3600, geometry: geom, source: 'osrm' };
+            _osrmCache[key] = result;
+            return result;
+        }
+    } catch(e) { console.warn('OSRM error:', e); }
+    // Fallback to estimate
+    const d = estimateDistance(wp1, wp2);
+    return { distanceKm: d, durationHours: d / CONFIG.AVERAGE_SPEED_KMH, geometry: [[wp1.lat,wp1.lon],[wp2.lat,wp2.lon]], source: 'estimate' };
+}
+
+async function recalcDayOSRM(day, progressCb, label) {
+    day.segments = []; day.totalKm = 0; day.totalHours = 0; day.elevGain = 0; day.elevLoss = 0; day.unpavedSegs = 0;
+    for (let i = 0; i < day.waypoints.length - 1; i++) {
+        const w1 = day.waypoints[i], w2 = day.waypoints[i+1];
+        // Rate limit: 1.1s between requests
+        await new Promise(r => setTimeout(r, 1100));
+        if (progressCb) progressCb(`${label}: OSRM ${i+1}/${day.waypoints.length-1}`, -1);
+        const route = await queryOSRM(w1, w2);
+        day.segments.push({fromWp:w1, toWp:w2, distanceKm:route.distanceKm, durationHours:route.durationHours, isUnpaved:w2.is_unpaved, geometry:route.geometry});
+        day.totalKm += route.distanceKm; day.totalHours += route.durationHours;
+        if (w2.is_unpaved) day.unpavedSegs++;
+        const diff = (w2.elevation||0) - (w1.elevation||0);
+        if (diff > 0) day.elevGain += diff; else day.elevLoss += Math.abs(diff);
+    }
+}
+
+async function optimizeRouteAsync(allWaypoints, finishLat, finishLon, finishName, unpavedMode, maxUnpaved, useOSRM, progressCb) {
+    // Phase 1: build route using haversine estimates (fast)
+    const route = optimizeRoute(allWaypoints, finishLat, finishLon, finishName, unpavedMode, maxUnpaved, progressCb);
+
+    // Phase 2: recalculate with OSRM if requested (slow but accurate)
+    if (useOSRM && route) {
+        progressCb('Ricalcolo con routing OSRM reale... (può richiedere diversi minuti)', 93);
+        for (let i = 0; i < route.days.length; i++) {
+            await recalcDayOSRM(route.days[i], progressCb, `Giorno ${i+1}`);
+        }
+        enforceDailyKmLimit(route);
+        progressCb(`OSRM completato: ${route.totalKm.toFixed(0)} km reali`, 100);
+    }
+    return route;
+}
+
 // ── Main Optimizer ──────────────────────────────────────────
 
 function optimizeRoute(allWaypoints, finishLat, finishLon, finishName, unpavedMode, maxUnpaved, progressCb) {
