@@ -43,7 +43,7 @@ async function queryOSRM(wp1, wp2) {
     const key = `${wp1.lat.toFixed(5)},${wp1.lon.toFixed(5)}|${wp2.lat.toFixed(5)},${wp2.lon.toFixed(5)}`;
     if (_osrmCache[key]) return _osrmCache[key];
     try {
-        const url = `${OSRM_BASE}/route/v1/car/${wp1.lon},${wp1.lat};${wp2.lon},${wp2.lat}?overview=simplified&geometries=geojson&exclude=motorway`;
+        const url = `${OSRM_BASE}/route/v1/car/${wp1.lon},${wp1.lat};${wp2.lon},${wp2.lat}?overview=full&geometries=geojson`;
         const res = await fetch(url);
         const data = await res.json();
         if (data.code === 'Ok' && data.routes && data.routes.length) {
@@ -52,7 +52,7 @@ async function queryOSRM(wp1, wp2) {
             const result = { distanceKm: r.distance / 1000, durationHours: r.duration / 3600, geometry: geom, source: 'osrm' };
             _osrmCache[key] = result;
             return result;
-        }
+        } else { console.warn('OSRM response:', data); }
     } catch(e) { console.warn('OSRM error:', e); }
     // Fallback to estimate
     const d = estimateDistance(wp1, wp2);
@@ -81,12 +81,16 @@ async function fetchDayGeometry(day, progressCb, label) {
     const coords = day.waypoints.map(wp => `${wp.lon},${wp.lat}`).join(';');
     try {
         if (progressCb) progressCb(`${label}: caricamento percorso reale...`, -1);
-        const url = `${OSRM_BASE}/route/v1/car/${coords}?overview=full&geometries=geojson&exclude=motorway&steps=true`;
+        const url = `${OSRM_BASE}/route/v1/car/${coords}?overview=full&geometries=geojson&steps=true`;
+        console.log(`[OSRM] ${label}: fetching ${day.waypoints.length} waypoints...`);
         const res = await fetch(url);
+        if (!res.ok) { console.warn(`[OSRM] ${label}: HTTP ${res.status}`); return; }
         const data = await res.json();
+        console.log(`[OSRM] ${label}: response code=${data.code}, routes=${data.routes?.length}`);
         if (data.code === 'Ok' && data.routes && data.routes.length) {
             const route = data.routes[0];
             const legs = route.legs || [];
+            console.log(`[OSRM] ${label}: ${legs.length} legs, ${day.segments.length} segments`);
             // Update each segment with real geometry and distance from OSRM legs
             for (let i = 0; i < Math.min(legs.length, day.segments.length); i++) {
                 const leg = legs[i];
@@ -109,8 +113,11 @@ async function fetchDayGeometry(day, progressCb, label) {
             // Recalculate totals
             day.totalKm = day.segments.reduce((s, seg) => s + seg.distanceKm, 0);
             day.totalHours = day.segments.reduce((s, seg) => s + seg.durationHours, 0);
+            console.log(`[OSRM] ${label}: updated ${legs.length} segments, total=${day.totalKm.toFixed(0)} km`);
+        } else {
+            console.warn(`[OSRM] ${label}: failed - code=${data.code}, message=${data.message}`);
         }
-    } catch(e) { console.warn('OSRM multi-point error for ' + label + ':', e); }
+    } catch(e) { console.error('[OSRM] multi-point error for ' + label + ':', e); }
 }
 
 async function optimizeRouteAsync(allWaypoints, finishLat, finishLon, finishName, unpavedMode, maxUnpaved, useOSRM, progressCb) {
