@@ -102,8 +102,13 @@
                     <div class="card-title"><span class="icon">🏁</span> Punto di Arrivo (Traguardo)</div>
                     
                     <div class="input-group">
-                        <label for="finish-name">Nome località</label>
-                        <input type="text" id="finish-name" placeholder="Es. Roma, Bologna, ...">
+                        <label for="finish-name">Città / Indirizzo di arrivo</label>
+                        <div style="display:flex;gap:6px;">
+                            <input type="text" id="finish-name" placeholder="Es. Roma, Via Appia 10, ..." style="flex:1"
+                                   onkeydown="if(event.key==='Enter'){event.preventDefault();geocodeFinish()}">
+                            <button class="btn btn-primary" onclick="geocodeFinish()" style="width:auto;padding:8px 14px;" title="Cerca indirizzo">🔍</button>
+                        </div>
+                        <div id="geocode-status" class="hint" style="margin-top:4px;display:none"></div>
                     </div>
                     
                     <div class="input-row">

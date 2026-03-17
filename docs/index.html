@@ -91,7 +91,13 @@ input:focus{border-color:var(--acc);box-shadow:0 0 0 3px var(--glow)}input::plac
             </div>
             <!-- Finish -->
             <div class="cd"><div class="ct">🏁 Punto di Arrivo</div>
-                <div class="ig"><label>Nome</label><input type="text" id="fn" value="Traguardo" placeholder="Città arrivo"></div>
+                <div class="ig"><label>Città / Indirizzo di arrivo</label>
+                    <div style="display:flex;gap:6px">
+                        <input type="text" id="fn" value="" placeholder="Es. Roma, Via Appia 10, ..." style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();geocodeAddr()}">
+                        <button class="btn btn-p" onclick="geocodeAddr()" style="width:auto;padding:8px 14px" title="Cerca">🔍</button>
+                    </div>
+                    <div id="gst" style="font-size:.7rem;color:var(--t3);margin-top:4px;display:none"></div>
+                </div>
                 <div class="ig"><label>Latitudine</label><input type="number" id="flat" step="0.0001" placeholder="es. 43.1234"></div>
                 <div class="ig"><label>Longitudine</label><input type="number" id="flon" step="0.0001" placeholder="es. 11.5678"></div>
                 <button class="btn btn-s" onclick="enableSetFinish()" style="margin-bottom:8px">📍 Clicca sulla mappa</button>
@@ -181,6 +187,33 @@ function clrSearch(){document.getElementById('qs').value='';searchWP('')}
 // Finish
 function enableSetFinish(){settingFinish=true;map.getContainer().style.cursor='crosshair'}
 function setU(mode){uMode=mode;document.querySelectorAll('.tb[data-u]').forEach(b=>b.classList.toggle('a',b.dataset.u===mode));document.getElementById('mug').style.display=mode==='limit'?'block':'none'}
+
+async function geocodeAddr(){
+    const q=document.getElementById('fn').value.trim();
+    if(!q){alert('Inserisci un nome città o indirizzo');return}
+    const st=document.getElementById('gst');st.style.display='block';st.textContent='🔍 Ricerca in corso...';st.style.color='#94a3b8';
+    try{
+        let url=`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&countrycodes=it&limit=5&addressdetails=1`;
+        let res=await fetch(url,{headers:{'Accept-Language':'it'}});
+        let results=await res.json();
+        if(!results.length){
+            url=`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5&addressdetails=1`;
+            res=await fetch(url,{headers:{'Accept-Language':'it'}});
+            results=await res.json();
+        }
+        if(!results.length){st.textContent='❌ Nessun risultato';st.style.color='#ef4444';return}
+        const r=results[0],lat=parseFloat(r.lat),lon=parseFloat(r.lon);
+        document.getElementById('flat').value=lat.toFixed(5);
+        document.getElementById('flon').value=lon.toFixed(5);
+        st.textContent=`✅ ${r.display_name.split(',').slice(0,3).join(',')}`;
+        st.style.color='#22c55e';
+        // Add/move finish marker
+        if(window._finishMk)map.removeLayer(window._finishMk);
+        window._finishMk=L.marker([lat,lon],{draggable:true}).addTo(map).bindPopup(`<div class="pt">🏁 ${document.getElementById('fn').value}</div>`).openPopup();
+        window._finishMk.on('dragend',e=>{const p=e.target.getLatLng();document.getElementById('flat').value=p.lat.toFixed(5);document.getElementById('flon').value=p.lng.toFixed(5)});
+        map.setView([lat,lon],12,{animate:true});
+    }catch(e){st.textContent='❌ Errore: '+e.message;st.style.color='#ef4444'}
+}
 
 // Optimize
 function runOptimize(){

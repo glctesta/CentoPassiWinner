@@ -366,6 +366,54 @@ function setFinishFromInputs() {
     }
 }
 
+async function geocodeFinish() {
+    const query = document.getElementById('finish-name').value.trim();
+    if (!query) { alert('Inserisci un nome città o indirizzo'); return; }
+    
+    const statusEl = document.getElementById('geocode-status');
+    statusEl.style.display = 'block';
+    statusEl.textContent = '🔍 Ricerca in corso...';
+    statusEl.style.color = '#94a3b8';
+    
+    try {
+        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=it&limit=5&addressdetails=1`;
+        const res = await fetch(url, { headers: { 'Accept-Language': 'it' } });
+        const results = await res.json();
+        
+        if (results.length === 0) {
+            // Retry without country restriction
+            const url2 = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&addressdetails=1`;
+            const res2 = await fetch(url2, { headers: { 'Accept-Language': 'it' } });
+            const results2 = await res2.json();
+            if (results2.length === 0) {
+                statusEl.textContent = '❌ Nessun risultato trovato';
+                statusEl.style.color = '#ef4444';
+                return;
+            }
+            applyGeocodeResult(results2[0], statusEl);
+        } else {
+            applyGeocodeResult(results[0], statusEl);
+        }
+    } catch(e) {
+        statusEl.textContent = '❌ Errore di rete: ' + e.message;
+        statusEl.style.color = '#ef4444';
+    }
+}
+
+function applyGeocodeResult(result, statusEl) {
+    const lat = parseFloat(result.lat);
+    const lon = parseFloat(result.lon);
+    document.getElementById('finish-lat').value = lat.toFixed(6);
+    document.getElementById('finish-lon').value = lon.toFixed(6);
+    
+    const displayName = result.display_name.split(',').slice(0, 3).join(',');
+    statusEl.textContent = `✅ ${displayName}`;
+    statusEl.style.color = '#22c55e';
+    
+    setFinishPoint(lat, lon);
+    state.map.setView([lat, lon], 12, { animate: true });
+}
+
 // ── Optimize ────────────────────────────────────────────────
 
 async function startOptimization() {
