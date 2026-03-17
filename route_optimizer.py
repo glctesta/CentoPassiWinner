@@ -625,16 +625,17 @@ class RouteOptimizer:
         # Sort by distance to route (closest first)
         candidates.sort(key=lambda x: x[1])
         
-        # Pick top N, spread across days if possible
+        # Ascending distribution: more alternatives on later days
+        # Day 1: 1, Day 2: 2, Day 3: 3, Day 4: 4 = 10 total
         alternatives = []
         day_counts = {1: 0, 2: 0, 3: 0, 4: 0}
-        max_per_day = (num_alternatives // 4) + 1  # ~3 per day
+        max_per_day = {1: 1, 2: 2, 3: 3, 4: 4}
         
-        # First pass: balanced distribution
+        # First pass: ascending distribution
         for wp, dist, near_day in candidates:
             if len(alternatives) >= num_alternatives:
                 break
-            if day_counts.get(near_day, 0) < max_per_day:
+            if day_counts.get(near_day, 0) < max_per_day.get(near_day, 1):
                 wp.description = f"ALT Giorno {near_day} — {wp.description}" if wp.description else f"WP alternativo Giorno {near_day}"
                 alternatives.append(wp)
                 day_counts[near_day] = day_counts.get(near_day, 0) + 1

@@ -75,19 +75,68 @@ async function recalcDayOSRM(day, progressCb, label) {
     }
 }
 
+// Fetch real road geometry for an entire day (1 OSRM request with all WPs)
+async function fetchDayGeometry(day, progressCb, label) {
+    if (day.waypoints.length < 2) return;
+    const coords = day.waypoints.map(wp => `${wp.lon},${wp.lat}`).join(';');
+    try {
+        if (progressCb) progressCb(`${label}: caricamento percorso reale...`, -1);
+        const url = `${OSRM_BASE}/route/v1/car/${coords}?overview=full&geometries=geojson&exclude=motorway&steps=true`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.code === 'Ok' && data.routes && data.routes.length) {
+            const route = data.routes[0];
+            const legs = route.legs || [];
+            // Update each segment with real geometry and distance from OSRM legs
+            for (let i = 0; i < Math.min(legs.length, day.segments.length); i++) {
+                const leg = legs[i];
+                // Collect geometry from leg steps
+                let legGeom = [];
+                if (leg.steps) {
+                    leg.steps.forEach(step => {
+                        if (step.geometry && step.geometry.coordinates) {
+                            step.geometry.coordinates.forEach(c => legGeom.push([c[1], c[0]]));
+                        }
+                    });
+                }
+                if (legGeom.length >= 2) {
+                    day.segments[i].geometry = legGeom;
+                }
+                // Update distance and duration from OSRM
+                day.segments[i].distanceKm = leg.distance / 1000;
+                day.segments[i].durationHours = leg.duration / 3600;
+            }
+            // Recalculate totals
+            day.totalKm = day.segments.reduce((s, seg) => s + seg.distanceKm, 0);
+            day.totalHours = day.segments.reduce((s, seg) => s + seg.durationHours, 0);
+        }
+    } catch(e) { console.warn('OSRM multi-point error for ' + label + ':', e); }
+}
+
 async function optimizeRouteAsync(allWaypoints, finishLat, finishLon, finishName, unpavedMode, maxUnpaved, useOSRM, progressCb) {
     // Phase 1: build route using haversine estimates (fast)
     const route = optimizeRoute(allWaypoints, finishLat, finishLon, finishName, unpavedMode, maxUnpaved, progressCb);
+    if (!route) return route;
 
-    // Phase 2: recalculate with OSRM if requested (slow but accurate)
-    if (useOSRM && route) {
-        progressCb('Ricalcolo con routing OSRM reale... (può richiedere diversi minuti)', 93);
+    // Phase 2: ALWAYS fetch real road geometries for display (4 requests, fast)
+    progressCb('Caricamento percorso stradale reale...', 93);
+    for (let i = 0; i < route.days.length; i++) {
+        await fetchDayGeometry(route.days[i], progressCb, `Giorno ${i+1}`);
+        // Rate limit between day requests
+        if (i < route.days.length - 1) await new Promise(r => setTimeout(r, 1200));
+    }
+
+    // Phase 3: if OSRM checkbox is on, also do segment-by-segment recalculation
+    // (for even more accurate distances — slower)
+    if (useOSRM) {
+        progressCb('Ricalcolo distanze OSRM segmento per segmento...', 95);
         for (let i = 0; i < route.days.length; i++) {
             await recalcDayOSRM(route.days[i], progressCb, `Giorno ${i+1}`);
         }
-        enforceDailyKmLimit(route);
-        progressCb(`OSRM completato: ${route.totalKm.toFixed(0)} km reali`, 100);
     }
+
+    enforceDailyKmLimit(route);
+    progressCb(`Percorso completato: ${route.totalKm.toFixed(0)} km`, 100);
     return route;
 }
 
@@ -328,10 +377,13 @@ function selectAlternatives(route, allWps, num) {
         candidates.push({wp, dist:minDist, nearDay});
     }
     candidates.sort((a,b) => a.dist - b.dist);
-    const alts = [], dayCounts = {1:0,2:0,3:0,4:0}, maxPerDay = Math.floor(num/4)+1;
+    // Ascending distribution: more alternatives on later days
+    // Day 1: 1, Day 2: 2, Day 3: 3, Day 4: 4 = 10 total
+    const maxPerDay = {1: 1, 2: 2, 3: 3, 4: 4};
+    const alts = [], dayCounts = {1:0,2:0,3:0,4:0};
     for (const c of candidates) {
         if (alts.length >= num) break;
-        if ((dayCounts[c.nearDay]||0) < maxPerDay) {
+        if ((dayCounts[c.nearDay]||0) < (maxPerDay[c.nearDay]||1)) {
             c.wp.altDay = c.nearDay;
             alts.push(c.wp); dayCounts[c.nearDay] = (dayCounts[c.nearDay]||0)+1;
         }
