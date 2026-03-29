@@ -25,12 +25,31 @@
                     <span class="inst-text">Clicca sulla mappa per posizionare il Traguardo</span>
                 </div>
             </div>
+
+            <!-- ── Basemap Switcher ── -->
+            <div class="basemap-switcher" id="basemap-switcher">
+                <button class="basemap-toggle" id="basemap-toggle-btn"
+                        onclick="toggleBasemapPanel()" title="Cambia sfondo mappa">
+                    🗺️
+                </button>
+                <div class="basemap-panel" id="basemap-panel" style="display:none;">
+                    <div class="basemap-panel-title">Sfondo Mappa</div>
+                    <div class="basemap-grid" id="basemap-grid">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- ═══ Sidebar ═══ -->
         <aside class="sidebar">
             <div class="sidebar-header">
-                <h1>🏔️ CENTOPASSI</h1>
+                <div class="header-title-row">
+                    <h1>🏔️ CENTOPASSI</h1>
+                    <button class="btn-help" onclick="openHelp()" title="Guida e documentazione">
+                        ❓ Help
+                    </button>
+                </div>
                 <div class="subtitle">Route Planner 2026 — 29 Mag → 1 Giu</div>
             </div>
 
@@ -159,6 +178,11 @@
                         <input type="checkbox" id="use-osrm">
                         <label for="use-osrm">Usa routing OSRM reale (più lento, più preciso)</label>
                     </div>
+
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="check-roads">
+                        <label for="check-roads">🤖 Verifica chiusure stradali (Claude AI)</label>
+                    </div>
                     
                     <button class="btn btn-primary" id="btn-optimize" disabled>
                         🚀 Calcola Percorso
@@ -202,6 +226,9 @@
                         </div>
                     </div>
 
+                    <!-- Road Warnings (populated by JS) -->
+                    <div id="road-warnings-section" style="display:none;"></div>
+
                     <!-- Route Summary -->
                     <div class="card">
                         <div class="card-title"><span class="icon">🗺️</span> Riepilogo Percorso</div>
@@ -238,11 +265,125 @@
                         <div id="days-container"></div>
                     </div>
 
-                    <!-- Export -->
+                    <!-- Export legacy -->
                     <button class="btn btn-success" id="btn-export" style="display:none;">
-                        📥 Scarica GPX Percorso
+                        📥 Scarica GPX (file unico)
                     </button>
                 </div>
+
+                <!-- ═══ Road Routing Section ═══ -->
+                <div id="routing-section" style="display:none;">
+                    <div class="card routing-card">
+                        <div class="card-title"><span class="icon">🛣️</span> Routing Stradale Professionale</div>
+
+                        <!-- Quality indicator (before compute) -->
+                        <div id="routing-quality-bar" class="routing-quality-wrap" style="display:none;">
+                            <div class="routing-quality-label">
+                                Qualità tracciato: <span id="routing-quality-pct">0</span>%
+                                <span id="routing-quality-badge" class="routing-badge">stimato</span>
+                            </div>
+                            <div class="routing-progress-track">
+                                <div class="routing-progress-fill" id="routing-quality-fill" style="width:0%"></div>
+                            </div>
+                            <div class="routing-meta" id="routing-meta"></div>
+                        </div>
+
+                        <!-- Action buttons -->
+                        <div class="routing-actions">
+                            <button class="btn btn-primary" id="btn-compute-routing"
+                                    onclick="computeFullRouting()">
+                                🛣️ Calcola Routing Reale
+                            </button>
+                            <label class="checkbox-row" style="margin-top:6px;">
+                                <input type="checkbox" id="routing-claude-check">
+                                <span>Verifica condizioni strade (Claude AI)</span>
+                            </label>
+                        </div>
+
+                        <!-- Progress while computing -->
+                        <div id="routing-progress-wrap" style="display:none;">
+                            <div class="progress-container">
+                                <div class="progress-bar" id="routing-progress-bar" style="width:0%"></div>
+                            </div>
+                            <div class="progress-message" id="routing-progress-msg">…</div>
+                        </div>
+
+                        <!-- Compliance report -->
+                        <div id="routing-compliance" style="display:none;">
+                            <div class="routing-compliance-title" id="routing-compliance-title"></div>
+                            <div id="routing-violations-list"></div>
+                        </div>
+
+                        <!-- Road condition warnings -->
+                        <div id="routing-road-warnings" style="display:none;"></div>
+                    </div>
+                </div><!-- /routing-section -->
+
+                <!-- ═══ Route Editor Section ═══ -->
+                <div id="editor-section" style="display:none;">
+
+                    <!-- Day Tabs -->
+                    <div class="card editor-card">
+                        <div class="card-title"><span class="icon">🖊️</span> Editor Percorso Giornaliero</div>
+                        <div class="hint" id="editor-hint">
+                            Seleziona un giorno per modificarlo. Sulla mappa: <b>click verde</b> = aggiungi WP, <b>click colorato</b> = rimuovi WP dal giorno.
+                        </div>
+
+                        <!-- Day selector tabs -->
+                        <div class="day-tabs" id="day-tabs">
+                            <button class="day-tab" data-day="1" onclick="selectEditorDay(1)">G1</button>
+                            <button class="day-tab" data-day="2" onclick="selectEditorDay(2)">G2</button>
+                            <button class="day-tab" data-day="3" onclick="selectEditorDay(3)">G3</button>
+                            <button class="day-tab" data-day="4" onclick="selectEditorDay(4)">G4</button>
+                            <button class="day-tab day-tab-exit" onclick="exitEditorMode()">✕ Esci</button>
+                        </div>
+
+                        <!-- Current day info -->
+                        <div id="editor-day-info" class="editor-day-info" style="display:none;">
+                            <div class="editor-day-stats" id="editor-day-stats"></div>
+
+                            <!-- AI Optimize button for active day -->
+                            <div class="ai-opt-bar" id="ai-opt-bar">
+                                <button class="btn btn-ai" id="btn-ai-optimize"
+                                        onclick="aiOptimizeDay()">
+                                    🤖 Ottimizza Giorno con AI
+                                </button>
+                                <!-- Progress + result inline -->
+                                <div id="ai-opt-progress" style="display:none;" class="ai-opt-progress-wrap">
+                                    <div class="ai-progress-track">
+                                        <div class="ai-progress-fill" id="ai-progress-fill" style="width:0%"></div>
+                                    </div>
+                                    <div class="ai-progress-msg" id="ai-progress-msg">…</div>
+                                </div>
+                                <div id="ai-opt-result" class="ai-opt-result" style="display:none;"></div>
+                            </div>
+
+                            <div class="editor-wp-list" id="editor-wp-list"></div>
+                        </div>
+
+                        <!-- WP counter badge -->
+                        <div class="editor-total" id="editor-total"></div>
+                    </div>
+
+                    <!-- Per-day export -->
+                    <div class="card">
+                        <div class="card-title"><span class="icon">📥</span> Scarica GPX per Giorno</div>
+                        <div class="export-days-grid" id="export-days-grid">
+                            <button class="btn btn-secondary export-day-btn" onclick="downloadDay(1)">📥 Giorno 1</button>
+                            <button class="btn btn-secondary export-day-btn" onclick="downloadDay(2)">📥 Giorno 2</button>
+                            <button class="btn btn-secondary export-day-btn" onclick="downloadDay(3)">📥 Giorno 3</button>
+                            <button class="btn btn-secondary export-day-btn" onclick="downloadDay(4)">📥 Giorno 4</button>
+                        </div>
+                        <button class="btn btn-success" onclick="downloadAllDays()" style="margin-top:8px;">
+                            📦 Scarica Tutti (4 file GPX separati)
+                        </button>
+                        <div class="hint" style="margin-top:6px;">
+                            Ogni file GPX usa naming: <code>WP001 G1 05/100</code>
+                        </div>
+                    </div>
+
+                </div><!-- /editor-section -->
+
             </div>
         </aside>
 
@@ -250,9 +391,538 @@
         <button class="sidebar-toggle" id="sidebar-toggle">☰</button>
     </div>
 
+    <!-- ═══════════════════════════════════════════════════════════
+         HELP MODAL — Documentazione completa CentopassiWinner
+         ═══════════════════════════════════════════════════════════ -->
+    <div id="help-modal" class="help-modal" style="display:none;" onclick="closeHelpBackdrop(event)">
+        <div class="help-dialog">
+
+            <!-- Header -->
+            <div class="help-header">
+                <div class="help-header-left">
+                    <span class="help-logo">🏔️</span>
+                    <div>
+                        <div class="help-title">CentopassiWinner</div>
+                        <div class="help-version">Route Planner 2026 — Documentazione Completa</div>
+                    </div>
+                </div>
+                <button class="help-close" onclick="closeHelp()" title="Chiudi (Esc)">✕</button>
+            </div>
+
+            <!-- Tab Navigation -->
+            <div class="help-tabs">
+                <button class="help-tab active" onclick="switchHelpTab('overview', this)">📌 Panoramica</button>
+                <button class="help-tab" onclick="switchHelpTab('rules', this)">📋 Regole Gara</button>
+                <button class="help-tab" onclick="switchHelpTab('usage', this)">🚀 Come si Usa</button>
+                <button class="help-tab" onclick="switchHelpTab('routing', this)">🛣️ Routing</button>
+                <button class="help-tab" onclick="switchHelpTab('ai', this)">🤖 AI Optimizer</button>
+                <button class="help-tab" onclick="switchHelpTab('editor', this)">✏️ Editor</button>
+                <button class="help-tab" onclick="switchHelpTab('gpx', this)">📥 Esportazione</button>
+                <button class="help-tab" onclick="switchHelpTab('config', this)">⚙️ Configurazione</button>
+            </div>
+
+            <!-- Tab Content -->
+            <div class="help-body">
+
+                <!-- ── TAB: Panoramica ── -->
+                <div id="htab-overview" class="help-section active">
+                    <h2>Panoramica del Sistema</h2>
+                    <p class="help-lead">
+                        <strong>CentopassiWinner</strong> è un pianificatore intelligente di percorsi progettato
+                        specificamente per la gara <strong>CENTOPASSI® 2026</strong> (29 maggio – 1 giugno 2026).
+                        L'obiettivo della gara è attraversare esattamente <strong>100 passi di montagna</strong>
+                        in auto nel minor tempo possibile, massimizzando il punteggio.
+                    </p>
+
+                    <div class="help-grid-2">
+                        <div class="help-feature-card">
+                            <div class="hfc-icon">📂</div>
+                            <div class="hfc-title">Import Waypoints</div>
+                            <div class="hfc-desc">Carica il file ufficiale GPX o XLSX con tutti i passi di montagna disponibili. Supporto drag &amp; drop.</div>
+                        </div>
+                        <div class="help-feature-card">
+                            <div class="hfc-icon">🧠</div>
+                            <div class="hfc-title">Ottimizzazione Automatica</div>
+                            <div class="hfc-desc">Algoritmo greedy + 2-opt che seleziona i 100 WP ottimali e li distribuisce sui 4 giorni rispettando tutti i vincoli.</div>
+                        </div>
+                        <div class="help-feature-card">
+                            <div class="hfc-icon">🛣️</div>
+                            <div class="hfc-title">Routing Professionale</div>
+                            <div class="hfc-desc">Calcolo percorsi su strade reali via OSRM (open source) o GraphHopper. Tracciato GPX completo che segue le strade.</div>
+                        </div>
+                        <div class="help-feature-card">
+                            <div class="hfc-icon">🤖</div>
+                            <div class="hfc-title">AI Day Optimizer</div>
+                            <div class="hfc-desc">Claude AI (Anthropic) riordina i WP di ogni giorno per il percorso più efficiente, rispettando le strade vietate.</div>
+                        </div>
+                        <div class="help-feature-card">
+                            <div class="hfc-icon">✏️</div>
+                            <div class="hfc-title">Editor Interattivo</div>
+                            <div class="hfc-desc">Clicca sulla mappa per aggiungere o rimuovere WP giorno per giorno. Modifica manuale in tempo reale.</div>
+                        </div>
+                        <div class="help-feature-card">
+                            <div class="hfc-icon">📥</div>
+                            <div class="hfc-title">Export GPX Multi-giorno</div>
+                            <div class="hfc-desc">Scarica 4 file GPX separati (uno per giorno) o un unico ZIP. Naming convention con numero WP, giorno e posizione.</div>
+                        </div>
+                    </div>
+
+                    <h3>Architettura Tecnica</h3>
+                    <div class="help-table-wrap">
+                        <table class="help-table">
+                            <thead><tr><th>Componente</th><th>Tecnologia</th><th>Ruolo</th></tr></thead>
+                            <tbody>
+                                <tr><td>Backend</td><td>Python 3.10+ / Flask</td><td>Server API REST, ottimizzazione, routing</td></tr>
+                                <tr><td>Frontend</td><td>Vanilla JS / Leaflet.js</td><td>Mappa interattiva, UI sidebar</td></tr>
+                                <tr><td>Routing primario</td><td>OSRM (demo server)</td><td>Percorsi stradali reali, GPX completo</td></tr>
+                                <tr><td>Routing alternativo</td><td>GraphHopper API</td><td>Avoid motorway+toll, 500 req/day free</td></tr>
+                                <tr><td>AI Optimization</td><td>Claude Sonnet (Anthropic)</td><td>Riordino WP intelligente + road check</td></tr>
+                                <tr><td>Dati mappa</td><td>OpenStreetMap + 8 tile layer</td><td>8 temi sfondo intercambiabili</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- ── TAB: Regole Gara ── -->
+                <div id="htab-rules" class="help-section">
+                    <h2>Regole Ufficiali CENTOPASSI® 2026</h2>
+                    <p class="help-lead">Il programma implementa tutte le regole ufficiali del regolamento. Ecco i vincoli principali gestiti automaticamente.</p>
+
+                    <h3>Finestre Temporali</h3>
+                    <div class="help-table-wrap">
+                        <table class="help-table">
+                            <thead><tr><th>Giorno</th><th>Partenza</th><th>Stop serale</th><th>Ore guida</th><th>Max km (46 km/h, -90 min)</th></tr></thead>
+                            <tbody>
+                                <tr><td>G1 — 29 maggio</td><td>08:00</td><td>21:15</td><td>13.25h</td><td><strong>540 km</strong></td></tr>
+                                <tr><td>G2 — 30 maggio</td><td>05:00</td><td>21:15</td><td>16.25h</td><td><strong>678 km</strong></td></tr>
+                                <tr><td>G3 — 31 maggio</td><td>05:00</td><td>21:15</td><td>16.25h</td><td><strong>678 km</strong></td></tr>
+                                <tr><td>G4 — 1 giugno</td><td>05:00</td><td>17:30</td><td>12.5h</td><td><strong>506 km</strong></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="help-note">⚙️ Formula: <code>(ore_guida − 1.5h_pause) × 46 km/h</code></p>
+
+                    <h3>Punteggio</h3>
+                    <div class="help-table-wrap">
+                        <table class="help-table">
+                            <thead><tr><th>Voce</th><th>Punti</th></tr></thead>
+                            <tbody>
+                                <tr><td>Passo regolare</td><td>5.000 pt</td></tr>
+                                <tr><td>Golden Point (se raggiunti 100 passi)</td><td>15.000 pt</td></tr>
+                                <tr><td>Golden Point (senza 100 passi)</td><td>5.000 pt</td></tr>
+                                <tr><td>Quota altimetrica (salita + discesa)</td><td>1 pt/metro</td></tr>
+                                <tr><td>Bonus 100° passo entro 50 km dal traguardo</td><td>100.000 pt</td></tr>
+                                <tr><td>Penalità per km sotto 1600 totali</td><td>−100 pt/km</td></tr>
+                                <tr><td>Penalità arrivo fuori 17:15–17:45</td><td>−100.000 pt</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <h3>Vincoli Percorso</h3>
+                    <ul class="help-list">
+                        <li><strong>100 passi esatti</strong> — né di più, né di meno</li>
+                        <li><strong>Totale ≥ 1600 km</strong> — distanza minima di percorrenza</li>
+                        <li><strong>Partenza &gt;15 km</strong> dal primo passo (art. 6.2)</li>
+                        <li><strong>Partenza ≤450 km</strong> (aria) dal traguardo (art. 6.2)</li>
+                        <li><strong>Bonus 100°</strong>: il 100° passo deve essere entro 50 km dal traguardo</li>
+                        <li><strong>Bridge inter-giorno</strong>: il 1° WP del giorno N+1 deve trovarsi a <strong>20–40 km su strada</strong> dall'ultimo WP del giorno N</li>
+                    </ul>
+
+                    <h3>Strade Vietate (Art. Regolamento)</h3>
+                    <div class="help-alert help-alert-danger">
+                        ⛔ <strong>Esclusione dalla classifica</strong> in caso di transito su:
+                        Autostrade · Tangenziali · Scorrimenti veloci (SSV) · Strade di Grande Comunicazione (SGC) · Circonvallazioni · Ring road / Highway / Motorway
+                    </div>
+                    <p>Il programma verifica automaticamente la compliance tramite ispezione dei nomi strade OSRM e avvisa in caso di violazioni rilevate.</p>
+
+                    <h3>Waypoint Opzionali</h3>
+                    <p>Dopo l'ottimizzazione vengono selezionati <strong>10 WP di riserva</strong> distribuiti proporzionalmente:
+                    più opzioni verso gli ultimi giorni (formula triangolare: G1=1, G2=2, G3=3, G4=4).</p>
+                </div>
+
+                <!-- ── TAB: Come si Usa ── -->
+                <div id="htab-usage" class="help-section">
+                    <h2>Guida all'Uso — Passo per Passo</h2>
+
+                    <div class="help-step">
+                        <div class="help-step-num">1</div>
+                        <div class="help-step-body">
+                            <div class="help-step-title">Carica i Waypoints</div>
+                            <p>Clicca sulla zona "📂 Carica Waypoints" oppure trascina il file. Formati supportati:</p>
+                            <ul class="help-list">
+                                <li><strong>GPX</strong> — File ufficiale CENTOPASSI (es. <code>Generale 2026.GPX</code>)</li>
+                                <li><strong>XLSX / XLS</strong> — Foglio Excel con colonne: nome, latitudine, longitudine, quota, tipo</li>
+                            </ul>
+                            <p>Dopo il caricamento, tutti i passi vengono visualizzati sulla mappa come marker colorati.</p>
+                        </div>
+                    </div>
+
+                    <div class="help-step">
+                        <div class="help-step-num">2</div>
+                        <div class="help-step-body">
+                            <div class="help-step-title">Posiziona il Traguardo</div>
+                            <p>Clicca il bottone <strong>"📍 Posiziona Traguardo"</strong>, poi clicca sulla mappa nel punto di arrivo (es. piazza della città di arrivo). Il traguardo è necessario per il calcolo del bonus 100° passo.</p>
+                        </div>
+                    </div>
+
+                    <div class="help-step">
+                        <div class="help-step-num">3</div>
+                        <div class="help-step-body">
+                            <div class="help-step-title">Avvia l'Ottimizzazione</div>
+                            <p>Clicca <strong>"🚀 Ottimizza Percorso"</strong>. L'algoritmo:</p>
+                            <ul class="help-list">
+                                <li>Seleziona i 100 WP con il punteggio migliore (quota, GP, distanza)</li>
+                                <li>Li distribuisce sui 4 giorni rispettando km massimi e bridge 20–40 km</li>
+                                <li>Applica nearest-neighbor + 2-opt per minimizzare la distanza totale</li>
+                                <li>Sceglie 10 WP opzionali come riserva</li>
+                            </ul>
+                            <p>L'operazione dura 10–60 secondi in base al numero di waypoint.</p>
+                        </div>
+                    </div>
+
+                    <div class="help-step">
+                        <div class="help-step-num">4</div>
+                        <div class="help-step-body">
+                            <div class="help-step-title">Calcola il Routing Stradale</div>
+                            <p>Nella sezione <strong>"🛣️ Routing Stradale"</strong> clicca <strong>"Calcola Percorsi Reali"</strong>. Il sistema interroga OSRM per ogni segmento WP→WP e costruisce il tracciato GPX che segue le strade reali. Questo passaggio può richiedere 2–10 minuti in base al numero di segmenti.</p>
+                        </div>
+                    </div>
+
+                    <div class="help-step">
+                        <div class="help-step-num">5</div>
+                        <div class="help-step-body">
+                            <div class="help-step-title">Ottimizza con AI (opzionale)</div>
+                            <p>Nell'editor, seleziona un giorno e clicca <strong>"🤖 Ottimizza Giorno con AI"</strong>. Claude AI analizza i WP del giorno e suggerisce l'ordine ottimale evitando backtracking e strade vietate.</p>
+                        </div>
+                    </div>
+
+                    <div class="help-step">
+                        <div class="help-step-num">6</div>
+                        <div class="help-step-body">
+                            <div class="help-step-title">Modifica Manualmente (Editor)</div>
+                            <p>Nella sezione <strong>"✏️ Editor Percorso"</strong>: seleziona un giorno → clicca WP verdi sulla mappa per aggiungerli → clicca WP colorati per rimuoverli. Le statistiche si aggiornano in tempo reale.</p>
+                        </div>
+                    </div>
+
+                    <div class="help-step">
+                        <div class="help-step-num">7</div>
+                        <div class="help-step-body">
+                            <div class="help-step-title">Esporta i file GPX</div>
+                            <p>Clicca <strong>"📥 Scarica GPX Giorno N"</strong> per il singolo giorno oppure <strong>"📦 Scarica Tutti"</strong> per ottenere uno ZIP con 4 file GPX separati. I file sono compatibili con Garmin, Wahoo, komoot, Wikiloc.</p>
+                        </div>
+                    </div>
+
+                    <h3>Sfondo Mappa</h3>
+                    <p>Clicca il bottone <strong>🗺️</strong> in alto a sinistra sulla mappa per scegliere tra 8 temi: Standard, Satellite, Terreno, OpenTopoMap, Cicloviario, Scuro, Nautical, Acquarello.</p>
+                </div>
+
+                <!-- ── TAB: Routing ── -->
+                <div id="htab-routing" class="help-section">
+                    <h2>Routing Stradale Professionale</h2>
+                    <p class="help-lead">Il sistema usa routing reale su strade (non linea retta) per produrre tracciati GPX accurati e verificare la compliance con le regole di gara.</p>
+
+                    <h3>Provider Chain</h3>
+                    <div class="help-table-wrap">
+                        <table class="help-table">
+                            <thead><tr><th>Priorità</th><th>Provider</th><th>Vantaggi</th><th>Limite</th></tr></thead>
+                            <tbody>
+                                <tr>
+                                    <td><span class="help-badge help-badge-green">1°</span></td>
+                                    <td><strong>GraphHopper API</strong></td>
+                                    <td>Avoid motorway+toll nativi, nomi strade italiani precisi</td>
+                                    <td>Richiede API key, 500 req/giorno (piano free)</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="help-badge help-badge-blue">2°</span></td>
+                                    <td><strong>OSRM</strong> (demo server)</td>
+                                    <td>Open source, gratuito, geometria <code>overview=full</code></td>
+                                    <td>No exclude nativo, compliance post-hoc</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="help-badge help-badge-gray">3°</span></td>
+                                    <td><strong>Haversine</strong> (fallback)</td>
+                                    <td>Sempre disponibile, istantaneo</td>
+                                    <td>Linea retta ×1.35, nessun GPX reale</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <h3>Compliance Strade Vietate</h3>
+                    <p>OSRM non supporta il parametro <code>exclude=motorway</code> sul server demo. Il sistema usa invece <strong>ispezione post-hoc</strong>:</p>
+                    <ul class="help-list">
+                        <li>OSRM restituisce i nomi di ogni strada nel percorso (<code>steps=true</code>)</li>
+                        <li>Il sistema confronta ogni nome con la lista <code>FORBIDDEN_ROAD_KEYWORDS</code></li>
+                        <li>Se trova violazioni, tenta un rerouting alternativo con waypoint intermedio</li>
+                        <li>Le violazioni residue vengono segnalate nel pannello compliance</li>
+                    </ul>
+
+                    <h3>Parametri OSRM Usati</h3>
+                    <div class="help-code">
+GET /route/v1/car/{lon1},{lat1};{lon2},{lat2}
+?overview=full       ← geometria completa (non semplificata)
+&geometries=geojson  ← formato coordinate
+&steps=true          ← nomi strade per compliance check
+&annotations=false   ← disabilita dati extra inutili</div>
+
+                    <h3>Cache Automatica</h3>
+                    <p>Ogni percorso calcolato viene salvato in <code>route_cache.json</code>. Al successivo avvio il server ricarica la cache, evitando chiamate API ridondanti. La cache viene salvata ogni 50 nuove richieste.</p>
+
+                    <h3>Qualità Routing</h3>
+                    <p>Dopo il calcolo, la barra di qualità mostra:</p>
+                    <ul class="help-list">
+                        <li><strong>% segmenti con routing reale</strong> (verde &gt;80%, arancione 50–80%, rosso &lt;50%)</li>
+                        <li><strong>Punti GPX totali</strong> — un buon routing ha &gt;10.000 trkpt per giorno</li>
+                        <li><strong>Violazioni strade</strong> — lista delle strade potenzialmente vietate rilevate</li>
+                    </ul>
+                </div>
+
+                <!-- ── TAB: AI Optimizer ── -->
+                <div id="htab-ai" class="help-section">
+                    <h2>AI Day Optimizer — Claude AI</h2>
+                    <p class="help-lead">L'ottimizzatore AI usa <strong>Claude Sonnet</strong> (Anthropic) per trovare l'ordine ideale dei waypoint di ogni singolo giorno, considerando tutti i vincoli della gara.</p>
+
+                    <h3>Come Funziona</h3>
+                    <ol class="help-list">
+                        <li>Estrae la lista dei WP del giorno con coordinate, quota e tipo (GP, sterrato)</li>
+                        <li>Calcola la matrice delle distanze haversine tra tutti i WP</li>
+                        <li>Invia il tutto a Claude con le regole complete della gara</li>
+                        <li>Claude restituisce un JSON con l'ordine ottimale e la motivazione</li>
+                        <li>Il risultato viene raffinato con l'algoritmo <strong>2-opt</strong> locale</li>
+                        <li>Il vincolo <em>bridge</em> viene applicato forzatamente sull'ordine finale</li>
+                    </ol>
+
+                    <h3>Vincoli Comunicati all'AI</h3>
+                    <ul class="help-list">
+                        <li>Finestra temporale giornaliera e km massimi</li>
+                        <li>Vincolo bridge 20–40 km dal giorno precedente</li>
+                        <li><strong>Strade vietate</strong>: autostrade, tangenziali, SSV, SGC, circonvallazioni</li>
+                        <li>Preferenza per strade secondarie (SP, SS, strade comunali)</li>
+                        <li>Strategia altimetrica (salite al mattino, discese la sera)</li>
+                        <li>Priorità ai Golden Point (3× punti) e gestione sterrati</li>
+                    </ul>
+
+                    <h3>Fallback Automatico</h3>
+                    <p>Se Claude non è disponibile (API key mancante o errore di rete), il sistema usa automaticamente <strong>Greedy Nearest-Neighbor + 2-opt</strong> come algoritmo di fallback — comunque molto efficiente.</p>
+
+                    <h3>Output del Risultato</h3>
+                    <div class="help-table-wrap">
+                        <table class="help-table">
+                            <thead><tr><th>Campo</th><th>Descrizione</th></tr></thead>
+                            <tbody>
+                                <tr><td><code>method</code></td><td><em>claude+2opt</em> / <em>2opt</em> / <em>unchanged</em></td></tr>
+                                <tr><td><code>before.km</code></td><td>Distanza stimata prima dell'ottimizzazione</td></tr>
+                                <tr><td><code>after.km</code></td><td>Distanza stimata dopo</td></tr>
+                                <tr><td><code>improvement_km</code></td><td>km risparmiati (positivo = miglioramento)</td></tr>
+                                <tr><td><code>improvement_pct</code></td><td>Percentuale di miglioramento</td></tr>
+                                <tr><td><code>reasoning</code></td><td>Spiegazione in italiano della logica AI</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="help-alert help-alert-info">
+                        💡 <strong>Suggerimento</strong>: Usa l'AI Optimizer <em>dopo</em> il routing stradale per ottenere sia l'ordine ottimale che il tracciato GPX corretto.
+                    </div>
+                </div>
+
+                <!-- ── TAB: Editor ── -->
+                <div id="htab-editor" class="help-section">
+                    <h2>Editor Interattivo del Percorso</h2>
+                    <p class="help-lead">L'editor permette di modificare manualmente il percorso giorno per giorno direttamente sulla mappa, dopo l'ottimizzazione automatica.</p>
+
+                    <h3>Accesso all'Editor</h3>
+                    <p>Dopo l'ottimizzazione, scorrere nella sidebar fino alla sezione <strong>"✏️ Editor Percorso"</strong>. Selezionare il giorno con i tab G1–G4.</p>
+
+                    <h3>Aggiungere un Waypoint</h3>
+                    <ul class="help-list">
+                        <li>I WP non ancora assegnati appaiono sulla mappa come <strong>cerchi verdi semitrasparenti</strong></li>
+                        <li>Cliccare su un WP verde → popup con bottone <strong>"+ Aggiungi al Giorno N"</strong></li>
+                        <li>Il WP viene inserito nella posizione ottimale nella sequenza del giorno</li>
+                        <li>Le statistiche (km, ore) si aggiornano immediatamente</li>
+                    </ul>
+
+                    <h3>Rimuovere un Waypoint</h3>
+                    <ul class="help-list">
+                        <li>I WP del giorno selezionato appaiono come <strong>cerchi colorati grandi</strong> con numero di sequenza</li>
+                        <li>Cliccare su un WP nel percorso → popup con bottone <strong>"✕ Rimuovi dal Giorno N"</strong></li>
+                        <li>Il WP rimosso torna disponibile (cerchio verde) per altri giorni</li>
+                    </ul>
+
+                    <h3>Colori per Giorno</h3>
+                    <div class="help-day-colors">
+                        <span class="hdc g1">G1 — Viola</span>
+                        <span class="hdc g2">G2 — Ciano</span>
+                        <span class="hdc g3">G3 — Arancio</span>
+                        <span class="hdc g4">G4 — Rosso</span>
+                        <span class="hdc gp">GP — Oro ⭐</span>
+                        <span class="hdc unp">Sterrato 🟠</span>
+                    </div>
+
+                    <h3>Inserimento Ottimale</h3>
+                    <p>Quando si aggiunge un WP, il sistema usa l'algoritmo <strong>"cheapest insertion"</strong>: trova la posizione nella sequenza esistente che minimizza l'aumento di distanza, evitando backtracking.</p>
+
+                    <h3>Waypoint Opzionali</h3>
+                    <p>I 10 WP opzionali (riserve) sono già distribuiti per giorno nella sidebar dell'editor. Possono essere aggiunti al percorso con un click se serve sostituire un WP problematico.</p>
+                </div>
+
+                <!-- ── TAB: Esportazione GPX ── -->
+                <div id="htab-gpx" class="help-section">
+                    <h2>Esportazione GPX</h2>
+                    <p class="help-lead">I file GPX prodotti sono nel formato standard GPX 1.1 e contengono sia i waypoint che il tracciato completo su strade reali.</p>
+
+                    <h3>Naming Convention Waypoint</h3>
+                    <div class="help-code">Esempio: WP042 G2 07/25
+         │     │   │  └── Totale WP nel giorno
+         │     │   └───── Posizione nel giorno (07°)
+         │     └───────── Giorno di gara (Giorno 2)
+         └─────────────── Numero WP ufficiale (042)</div>
+
+                    <h3>Naming File GPX</h3>
+                    <div class="help-code">centopassi_2026_G1.gpx   ← Giorno 1
+centopassi_2026_G2.gpx   ← Giorno 2
+centopassi_2026_G3.gpx   ← Giorno 3
+centopassi_2026_G4.gpx   ← Giorno 4
+centopassi_2026_tutti.zip ← ZIP con i 4 file separati</div>
+
+                    <h3>Contenuto di ogni file GPX</h3>
+                    <ul class="help-list">
+                        <li><strong>&lt;wpt&gt;</strong> — Ogni waypoint con nome, descrizione, coordinate, quota</li>
+                        <li><strong>&lt;trk&gt;</strong> — Traccia completa su strade reali (se routing calcolato) o linea retta</li>
+                        <li><strong>&lt;trkseg&gt;</strong> — Un segmento per ogni tappa WP→WP</li>
+                        <li>Migliaia di <strong>&lt;trkpt&gt;</strong> che seguono esattamente le strade</li>
+                    </ul>
+
+                    <h3>Compatibilità</h3>
+                    <div class="help-table-wrap">
+                        <table class="help-table">
+                            <thead><tr><th>Dispositivo/App</th><th>Compatibilità</th></tr></thead>
+                            <tbody>
+                                <tr><td>Garmin (Edge, eTrex, Drive)</td><td>✅ Completa</td></tr>
+                                <tr><td>Wahoo ELEMNT</td><td>✅ Completa</td></tr>
+                                <tr><td>komoot</td><td>✅ Importazione percorso</td></tr>
+                                <tr><td>Wikiloc</td><td>✅ Importazione traccia</td></tr>
+                                <tr><td>Google Maps</td><td>⚠️ Solo punti, non traccia</td></tr>
+                                <tr><td>OsmAnd</td><td>✅ Completa</td></tr>
+                                <tr><td>QGIS / GIS</td><td>✅ Completa</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <h3>Descrizione Waypoint nel GPX</h3>
+                    <div class="help-code">&lt;name&gt;WP042 G2 07/25&lt;/name&gt;
+&lt;desc&gt;Giorno 2 | Posizione 07/25 | Totale gara 42/100&lt;/desc&gt;</div>
+                </div>
+
+                <!-- ── TAB: Configurazione ── -->
+                <div id="htab-config" class="help-section">
+                    <h2>Configurazione e Setup</h2>
+
+                    <h3>Requisiti di Sistema</h3>
+                    <ul class="help-list">
+                        <li>Python 3.10 o superiore</li>
+                        <li>Connessione internet (per OSRM, Claude API)</li>
+                        <li>Browser moderno (Chrome, Firefox, Edge, Safari)</li>
+                    </ul>
+
+                    <h3>Installazione Dipendenze</h3>
+                    <div class="help-code">pip install -r requirements.txt
+
+# Dipendenze principali:
+# flask>=3.0
+# requests>=2.31
+# anthropic>=0.39
+# python-dotenv>=1.0
+# openpyxl>=3.1</div>
+
+                    <h3>File .env — API Keys</h3>
+                    <p>Crea un file <code>.env</code> nella directory del progetto:</p>
+                    <div class="help-code"># Obbligatoria per AI Optimizer e Road Check
+ANTHROPIC_API_KEY=sk-ant-api03-...
+
+# Opzionale: GraphHopper (500 req/giorno gratuiti)
+# Ottieni la key su: https://www.graphhopper.com/
+GRAPHHOPPER_API_KEY=your-key-here</div>
+
+                    <h3>Avvio del Server</h3>
+                    <div class="help-code">cd CentoPassiWinner
+python app.py
+# → Server avviato su http://localhost:5000</div>
+
+                    <h3>Parametri Configurabili (config.py)</h3>
+                    <div class="help-table-wrap">
+                        <table class="help-table">
+                            <thead><tr><th>Parametro</th><th>Default</th><th>Descrizione</th></tr></thead>
+                            <tbody>
+                                <tr><td><code>AVERAGE_SPEED_KMH</code></td><td>46</td><td>Velocità media su strade di montagna</td></tr>
+                                <tr><td><code>BREAK_TIME_HOURS</code></td><td>1.5</td><td>Pause totali giornaliere (ore)</td></tr>
+                                <tr><td><code>BRIDGE_MIN_KM</code></td><td>20</td><td>Distanza minima bridge inter-giorno (km)</td></tr>
+                                <tr><td><code>BRIDGE_MAX_KM</code></td><td>40</td><td>Distanza massima bridge inter-giorno (km)</td></tr>
+                                <tr><td><code>NUM_ALTERNATIVES</code></td><td>10</td><td>WP opzionali di riserva</td></tr>
+                                <tr><td><code>OSRM_RATE_LIMIT_SEC</code></td><td>1.1</td><td>Intervallo tra richieste OSRM (s)</td></tr>
+                                <tr><td><code>HAVERSINE_ROAD_FACTOR</code></td><td>1.35</td><td>Moltiplicatore haversine → strada</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <h3>File Principali</h3>
+                    <div class="help-table-wrap">
+                        <table class="help-table">
+                            <thead><tr><th>File</th><th>Ruolo</th></tr></thead>
+                            <tbody>
+                                <tr><td><code>app.py</code></td><td>Server Flask, endpoint API REST</td></tr>
+                                <tr><td><code>config.py</code></td><td>Parametri e regole della gara</td></tr>
+                                <tr><td><code>route_optimizer.py</code></td><td>Algoritmo ottimizzazione + export GPX</td></tr>
+                                <tr><td><code>routing_service.py</code></td><td>Client OSRM + GraphHopper</td></tr>
+                                <tr><td><code>road_routing.py</code></td><td>Calcolo routing completo (async)</td></tr>
+                                <tr><td><code>ai_day_optimizer.py</code></td><td>Integrazione Claude AI</td></tr>
+                                <tr><td><code>road_intelligence.py</code></td><td>Check chiusure strade via AI</td></tr>
+                                <tr><td><code>models.py</code></td><td>Dataclass: Waypoint, Route, Segment</td></tr>
+                                <tr><td><code>gpx_parser.py</code></td><td>Parser file GPX</td></tr>
+                                <tr><td><code>xlsx_parser.py</code></td><td>Parser file Excel</td></tr>
+                                <tr><td><code>route_cache.json</code></td><td>Cache percorsi OSRM (auto-generato)</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <h3>Endpoint API</h3>
+                    <div class="help-table-wrap">
+                        <table class="help-table">
+                            <thead><tr><th>Metodo</th><th>Endpoint</th><th>Descrizione</th></tr></thead>
+                            <tbody>
+                                <tr><td>GET</td><td><code>/api/waypoints</code></td><td>Lista waypoints caricati</td></tr>
+                                <tr><td>POST</td><td><code>/api/upload</code></td><td>Carica file GPX/XLSX</td></tr>
+                                <tr><td>POST</td><td><code>/api/optimize</code></td><td>Avvia ottimizzazione percorso</td></tr>
+                                <tr><td>GET</td><td><code>/api/optimize/status</code></td><td>Stato ottimizzazione (polling)</td></tr>
+                                <tr><td>GET</td><td><code>/api/route/edit/state</code></td><td>Stato editor: WP per giorno</td></tr>
+                                <tr><td>POST</td><td><code>/api/route/edit/day/&lt;n&gt;/add</code></td><td>Aggiungi WP al giorno N</td></tr>
+                                <tr><td>POST</td><td><code>/api/route/edit/day/&lt;n&gt;/remove</code></td><td>Rimuovi WP dal giorno N</td></tr>
+                                <tr><td>POST</td><td><code>/api/route/full-routing</code></td><td>Avvia calcolo routing reale</td></tr>
+                                <tr><td>GET</td><td><code>/api/route/routing-status</code></td><td>Stato routing (polling)</td></tr>
+                                <tr><td>GET</td><td><code>/api/route/routing-stats</code></td><td>Statistiche qualità routing</td></tr>
+                                <tr><td>POST</td><td><code>/api/route/ai-optimize/day/&lt;n&gt;</code></td><td>Ottimizzazione AI giorno N</td></tr>
+                                <tr><td>GET</td><td><code>/api/route/ai-optimize/status</code></td><td>Stato ottimizzazione AI</td></tr>
+                                <tr><td>GET</td><td><code>/api/export/day/&lt;n&gt;</code></td><td>Scarica GPX giorno N</td></tr>
+                                <tr><td>GET</td><td><code>/api/export/all</code></td><td>Scarica ZIP tutti i giorni</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div><!-- /help-body -->
+
+            <!-- Footer -->
+            <div class="help-footer">
+                <span>CentopassiWinner v2.0 — <a href="https://github.com/glctesta/CentoPassiWinner" target="_blank" rel="noopener">GitHub</a></span>
+                <span>Basato sulle regole ufficiali <strong>CENTOPASSI® 2026</strong></span>
+                <button class="btn btn-sm" onclick="closeHelp()">Chiudi</button>
+            </div>
+
+        </div><!-- /help-dialog -->
+    </div><!-- /help-modal -->
+
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    
+
     <!-- App JS -->
     <script src="/static/js/app.js"></script>
 </body>

@@ -22,6 +22,7 @@ class Waypoint:
     is_unpaved: bool = False         # True if road type suggests dirt/bridleway
     road_type: str = ""              # Classified road type
     symbol: str = ""                 # Garmin symbol (Flag, Blue / Flag, Red)
+    road_warnings: list = field(default_factory=list)  # Warnings from road intelligence
 
     @property
     def number(self) -> str:
@@ -60,6 +61,7 @@ class Waypoint:
             'is_unpaved': self.is_unpaved,
             'road_type': self.road_type,
             'display_name': self.display_name,
+            'road_warnings': self.road_warnings,
         }
 
 
@@ -68,21 +70,32 @@ class RouteSegment:
     """A segment between two consecutive waypoints in the route."""
     from_wp: Waypoint
     to_wp: Waypoint
-    distance_km: float = 0.0         # Road distance
-    duration_hours: float = 0.0      # Estimated driving time
-    is_unpaved: bool = False         # Segment includes unpaved roads
-    geometry: list = field(default_factory=list)  # Route polyline [[lat, lon], ...]
-    road_distance_km: float = 0.0    # Real road distance (from OSRM)
-    air_distance_km: float = 0.0     # Straight-line distance
+    distance_km: float = 0.0           # Road distance
+    duration_hours: float = 0.0        # Estimated driving time
+    is_unpaved: bool = False           # Segment includes unpaved roads
+    geometry: list = field(default_factory=list)    # Route polyline [[lat,lon],...]
+    road_distance_km: float = 0.0      # Real road distance (from OSRM/GraphHopper)
+    air_distance_km: float = 0.0       # Straight-line distance
+    road_violations: list = field(default_factory=list)   # Forbidden road names found
+    step_names: list = field(default_factory=list)         # Road names from routing steps
+    routing_source: str = 'estimate'   # 'osrm'|'graphhopper'|'cache'|'estimate'
+
+    @property
+    def has_real_routing(self) -> bool:
+        """True when geometry comes from a real routing API (not haversine estimate)."""
+        return len(self.geometry) > 2
 
     def to_dict(self) -> dict:
         return {
-            'from_wp': self.from_wp.to_dict(),
-            'to_wp': self.to_wp.to_dict(),
-            'distance_km': round(self.distance_km, 1),
+            'from_wp':        self.from_wp.to_dict(),
+            'to_wp':          self.to_wp.to_dict(),
+            'distance_km':    round(self.distance_km, 1),
             'duration_hours': round(self.duration_hours, 2),
-            'is_unpaved': self.is_unpaved,
-            'geometry': self.geometry,
+            'is_unpaved':     self.is_unpaved,
+            'geometry':       self.geometry,
+            'routing_source': self.routing_source,
+            'road_violations': self.road_violations,
+            'has_real_routing': self.has_real_routing,
         }
 
 
@@ -100,6 +113,7 @@ class DaySegment:
     total_elevation_loss: float = 0.0
     unpaved_segments: int = 0
     unpaved_km: float = 0.0
+    road_warnings: list = field(default_factory=list)  # Aggregated warnings for this day
 
     @property
     def waypoint_count(self) -> int:
@@ -124,6 +138,7 @@ class DaySegment:
             'unpaved_km': round(self.unpaved_km, 1),
             'waypoints': [wp.to_dict() for wp in self.waypoints],
             'segments': [seg.to_dict() for seg in self.segments],
+            'road_warnings': self.road_warnings,
         }
 
 
@@ -134,7 +149,8 @@ class Route:
     start_point: dict = field(default_factory=dict)  # {lat, lon, name}
     finish_point: dict = field(default_factory=dict)  # {lat, lon, name}
     alternatives: list = field(default_factory=list)  # List[Waypoint] - backup WPs
-    
+    road_warnings: list = field(default_factory=list)  # Global road intelligence warnings
+
     @property
     def total_km(self) -> float:
         return sum(d.total_km for d in self.days)
@@ -225,6 +241,7 @@ class Route:
             'score': self.calculate_score(),
             'days': [d.to_dict() for d in self.days],
             'alternatives': [wp.to_dict() for wp in self.alternatives],
+            'road_warnings': self.road_warnings,
         }
 
 

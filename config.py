@@ -24,12 +24,29 @@ FINISH_WINDOW_END = "17:45"     # Last day arrival window
 DRIVING_HOURS = [13.25, 16.25, 16.25, 12.5]
 
 # ── Speed & Distance ────────────────────────────────────────
-AVERAGE_SPEED_KMH = 50          # Range 45-55 km/h
+AVERAGE_SPEED_KMH = 46          # Realistic average speed on mountain roads
 MIN_SPEED_KMH = 45
 MAX_SPEED_KMH = 55
-MAX_KM_PER_DAY = 600            # Soft limit per day
+BREAK_TIME_HOURS = 1.5          # 90 minutes total breaks per day (eat, drink, fuel)
+# Per-day max km: (driving_hours - breaks) * avg_speed
+# Day 1: (13.25 - 1.5) * 46 = 540.5 km
+# Day 2: (16.25 - 1.5) * 46 = 678.5 km
+# Day 3: (16.25 - 1.5) * 46 = 678.5 km
+# Day 4: (12.50 - 1.5) * 46 = 506.0 km
+MAX_KM_PER_DAY_LIST = [(h - BREAK_TIME_HOURS) * AVERAGE_SPEED_KMH for h in DRIVING_HOURS]
 MIN_TOTAL_KM = 1600             # Minimum total route (art. 1.1)
 MAX_START_DISTANCE_KM = 450     # Max start distance from finish (art. 6.2)
+
+# ── Day-to-Day Bridging ────────────────────────────────────
+BRIDGE_MIN_KM = 20              # Min road distance between last WP day N and first WP day N+1
+BRIDGE_MAX_KM = 40              # Max road distance between last WP day N and first WP day N+1
+
+# ── Alternative (optional) Waypoints ──────────────────────
+NUM_ALTERNATIVES = 10           # Total backup WPs to select after optimization
+# Distribution: triangular weight = day_num (inversely proportional to remaining days)
+# For 4 days with 10 alts: 1 + 2 + 3 + 4 = 10  →  G1:1, G2:2, G3:3, G4:4
+# Formula: alt_per_day[d] = round(NUM_ALTERNATIVES * d / triangular(n_days))
+# where triangular(n) = n*(n+1)/2
 
 # ── Waypoint Rules ──────────────────────────────────────────
 TARGET_WAYPOINTS = 100           # Must reach exactly 100 passes
@@ -69,14 +86,28 @@ UNPAVED_ROAD_KEYWORDS = [
 # ── OSRM Routing ────────────────────────────────────────────
 OSRM_BASE_URL = "https://router.project-osrm.org"
 OSRM_PROFILE = "car"
-OSRM_EXCLUDE = "motorway"  # Exclude motorways from routing
+OSRM_EXCLUDE = "motorway"  # Exclude motorways from routing (OSRM param)
 OSRM_RATE_LIMIT_SEC = 1.1  # Seconds between requests (demo server)
 HAVERSINE_ROAD_FACTOR = 1.35  # Multiply haversine by this for road estimate
+
+# ── GraphHopper Routing (optional, richer avoid rules) ──────
+# Free tier: 500 req/day. Set GRAPHHOPPER_API_KEY in .env to enable.
+import os as _os
+GRAPHHOPPER_API_KEY  = _os.environ.get('GRAPHHOPPER_API_KEY', '')
+GRAPHHOPPER_BASE_URL = 'https://graphhopper.com/api/1'
+GRAPHHOPPER_PROFILE  = 'car'
+GRAPHHOPPER_AVOID    = ['motorway', 'toll']  # Maps to Italian autostrade + pedaggi
 
 # ── Flask ───────────────────────────────────────────────────
 FLASK_HOST = "0.0.0.0"
 FLASK_PORT = 5000
 FLASK_DEBUG = True
+
+# ── Road Intelligence (Claude API) ─────────────────────────
+ANTHROPIC_API_KEY_ENV = 'ANTHROPIC_API_KEY'
+ROAD_INTELLIGENCE_MODEL = 'claude-sonnet-4-20250514'
+ROAD_INTELLIGENCE_MAX_TOKENS = 1024
+ROAD_INTELLIGENCE_ENABLED = True  # Can be toggled off
 
 # ── GPX File ────────────────────────────────────────────────
 GPX_FILE = "Generale 2026.GPX"

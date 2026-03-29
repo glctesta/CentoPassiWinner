@@ -2,17 +2,20 @@
 Centopassi Route Planner - Route Optimization Engine
 Selects 100 waypoints and organizes them into a 4-day route.
 """
+import io
 import math
 import random
 from typing import Optional
 from models import Waypoint, RouteSegment, DaySegment, Route, haversine_km
 from routing_service import RoutingService
 from config import (
-    TARGET_WAYPOINTS, MAX_KM_PER_DAY, MIN_TOTAL_KM,
+    TARGET_WAYPOINTS, MAX_KM_PER_DAY_LIST, MIN_TOTAL_KM,
     MAX_START_DISTANCE_KM, MIN_START_DISTANCE_KM,
     DRIVING_HOURS, DAY1_START_TIME, OTHER_DAYS_START_TIME,
     REST_START_TIME, FINISH_WINDOW_START, AVERAGE_SPEED_KMH,
     BONUS_100TH_DISTANCE_KM, HAVERSINE_ROAD_FACTOR,
+    BRIDGE_MIN_KM, BRIDGE_MAX_KM,
+    NUM_ALTERNATIVES,
 )
 
 # Unpaved mode constants
@@ -28,6 +31,7 @@ class RouteOptimizer:
         self.all_waypoints = waypoints
         self.routing = routing or RoutingService(use_osrm=False)
         self._progress_callback = None
+        self.road_intelligence = None  # Set externally for road closure checks
     
     def set_progress_callback(self, callback):
         """Set a callback function(message, percent) for progress updates."""
@@ -142,9 +146,27 @@ class RouteOptimizer:
         best_route = self._optimize_2opt(best_route)
         
         self._progress("Selezione WP alternativi...", 90)
-        self._select_alternatives(best_route, num_alternatives=10)
+        self._select_alternatives(best_route)
         
-        self._progress("Calcolo distanze finali...", 92)
+        # Road intelligence: check for closures/hazards
+        if self.road_intelligence and self.road_intelligence.enabled:
+            self._progress("Verifica chiusure stradali (AI)...", 91)
+            regions = self._extract_regions(best_route)
+            warnings = self.road_intelligence.check_road_closures(regions)
+            best_route.road_warnings = warnings
+
+            if warnings:
+                affected = self.road_intelligence.get_affected_waypoints(best_route.all_waypoints)
+                for day in best_route.days:
+                    day_warnings = []
+                    for wp in day.waypoints:
+                        if wp.id in affected:
+                            wp.road_warnings = affected[wp.id]
+                            day_warnings.extend(affected[wp.id])
+                    day.road_warnings = day_warnings
+                self._progress(f"Trovati {len(warnings)} avvisi stradali", 92)
+
+        self._progress("Calcolo distanze finali...", 93)
         if use_osrm_routing:
             self._recalculate_with_osrm(best_route)
         
@@ -236,17 +258,31 @@ class RouteOptimizer:
                 day.start_time = OTHER_DAYS_START_TIME
                 max_hours = DRIVING_HOURS[day_num - 1]
             
-            # estimate_distance already includes HAVERSINE_ROAD_FACTOR (1.35)
-            # so day_km tracks road-estimated km — cap at actual MAX_KM_PER_DAY
-            max_km_today = min(MAX_KM_PER_DAY, max_hours * AVERAGE_SPEED_KMH)
+            # Per-day km limit based on (driving_hours - breaks) * avg_speed
+            max_km_today = MAX_KM_PER_DAY_LIST[day_num - 1]
             day_km = 0.0
             day_hours = 0.0
             day_wps = []
             day_segments = []
-            
+
             # Day 1: include start waypoint as first WP
+            # Days 2-4: find a bridge waypoint within BRIDGE_MIN/MAX_KM of previous day's last WP
             if day_num == 1:
                 day_wps.append(start_wp)
+            elif route.days and route.days[-1].waypoints:
+                prev_last_wp = route.days[-1].waypoints[-1]
+                bridge_wp = self._find_bridge_waypoint(
+                    prev_last_wp, available, finish_lat, finish_lon,
+                    unpaved_mode=unpaved_mode, max_unpaved=max_unpaved,
+                    current_unpaved_count=unpaved_count,
+                )
+                if bridge_wp:
+                    day_wps.append(bridge_wp)
+                    available.discard(bridge_wp.id)
+                    all_selected_ids.add(bridge_wp.id)
+                    current_wp = bridge_wp
+                    if bridge_wp.is_unpaved:
+                        unpaved_count += 1
             
             # Add waypoints greedily
             # Calculate ideal km per WP to ensure we reach MIN_TOTAL_KM overall
@@ -460,6 +496,56 @@ class RouteOptimizer:
         
         return best_wp
     
+    def _find_bridge_waypoint(self, last_wp: Waypoint, available: set,
+                               finish_lat: float, finish_lon: float,
+                               unpaved_mode: str = UNPAVED_LIMIT,
+                               max_unpaved: int = 10,
+                               current_unpaved_count: int = 0) -> Optional[Waypoint]:
+        """
+        Find the best waypoint within BRIDGE_MIN_KM to BRIDGE_MAX_KM (road distance)
+        from last_wp to start the next day. Uses OSRM if available, else haversine estimate.
+        """
+        unpaved_budget_left = True
+        if unpaved_mode == UNPAVED_EXCLUDE:
+            unpaved_budget_left = False
+        elif unpaved_mode == UNPAVED_LIMIT:
+            unpaved_budget_left = current_unpaved_count < max_unpaved
+
+        candidates = []
+        for wp_id in available:
+            wp = self.all_waypoints[wp_id]
+            if wp.is_unpaved and not unpaved_budget_left:
+                continue
+
+            road_dist = self.routing.estimate_distance(last_wp, wp)
+            if BRIDGE_MIN_KM <= road_dist <= BRIDGE_MAX_KM:
+                # Score: prefer direction toward finish + golden point bonus
+                wp_dist_to_finish = haversine_km(wp.lat, wp.lon, finish_lat, finish_lon)
+                last_dist_to_finish = haversine_km(last_wp.lat, last_wp.lon, finish_lat, finish_lon)
+                direction_score = (last_dist_to_finish - wp_dist_to_finish) * 0.1
+                gp_bonus = 5.0 if wp.is_golden_point else 0.0
+                unpaved_penalty = -5.0 if wp.is_unpaved else 0.0
+                # Prefer mid-range bridge distance (ideal ~30 km)
+                ideal_bridge = (BRIDGE_MIN_KM + BRIDGE_MAX_KM) / 2
+                dist_score = -abs(road_dist - ideal_bridge) * 0.5
+                score = direction_score + gp_bonus + unpaved_penalty + dist_score
+                candidates.append((wp, score))
+
+        if not candidates:
+            # Fallback: relax to nearest available within 2x range
+            for wp_id in available:
+                wp = self.all_waypoints[wp_id]
+                if wp.is_unpaved and not unpaved_budget_left:
+                    continue
+                road_dist = self.routing.estimate_distance(last_wp, wp)
+                if road_dist <= BRIDGE_MAX_KM * 2:
+                    candidates.append((wp, -road_dist))
+            if not candidates:
+                return None
+
+        candidates.sort(key=lambda x: -x[1])
+        return candidates[0][0]
+
     def _evaluate_route(self, route: Route) -> float:
         """Score a complete route for comparison."""
         score = 0.0
@@ -487,10 +573,22 @@ class RouteOptimizer:
             km_variance = sum((k - km_mean)**2 for k in km_values) / len(km_values)
             score -= km_variance * 0.01
             
-            # Penalize any day exceeding 600 km hard
-            for km in km_values:
-                if km > MAX_KM_PER_DAY:
-                    score -= (km - MAX_KM_PER_DAY) * 200
+            # Penalize any day exceeding its dynamic km limit
+            for day_idx, km in enumerate(km_values):
+                day_limit = MAX_KM_PER_DAY_LIST[day_idx] if day_idx < len(MAX_KM_PER_DAY_LIST) else MAX_KM_PER_DAY_LIST[-1]
+                if km > day_limit:
+                    score -= (km - day_limit) * 200
+
+            # Penalize bridging violations (days 2-4: first WP must be 20-40 km from prev day's last)
+            for i in range(1, len(route.days)):
+                prev_day = route.days[i - 1]
+                curr_day = route.days[i]
+                if prev_day.waypoints and curr_day.waypoints:
+                    bridge_dist = self.routing.estimate_distance(
+                        prev_day.waypoints[-1], curr_day.waypoints[0]
+                    )
+                    if bridge_dist < BRIDGE_MIN_KM or bridge_dist > BRIDGE_MAX_KM:
+                        score -= 5000
         
         # Fewer unpaved segments is better
         total_unpaved = sum(d.unpaved_segments for d in route.days)
@@ -572,87 +670,130 @@ class RouteOptimizer:
     
     def _enforce_daily_km_limit(self, route: Route):
         """
-        After 2-opt, ensure no day exceeds MAX_KM_PER_DAY.
+        After 2-opt, ensure no day exceeds its dynamic km limit.
         Trims excess WPs from the end of an over-limit day
         and prepends them to the start of the next day.
+        Also respects the bridging constraint (20-40 km between days).
         """
         for day_idx in range(len(route.days) - 1):
             day = route.days[day_idx]
             next_day = route.days[day_idx + 1]
-            
-            while day.total_km > MAX_KM_PER_DAY and len(day.waypoints) > 3:
+            day_limit = MAX_KM_PER_DAY_LIST[day_idx] if day_idx < len(MAX_KM_PER_DAY_LIST) else MAX_KM_PER_DAY_LIST[-1]
+
+            while day.total_km > day_limit and len(day.waypoints) > 3:
                 # Remove last WP from this day, add to start of next day
                 moved_wp = day.waypoints.pop()
                 next_day.waypoints.insert(0, moved_wp)
-                
+
                 # Recalculate both days
                 self._recalculate_day(day)
                 self._recalculate_day(next_day)
+
+                # Check bridging constraint: if violated, stop moving
+                if day.waypoints and next_day.waypoints:
+                    bridge_dist = self.routing.estimate_distance(
+                        day.waypoints[-1], next_day.waypoints[0]
+                    )
+                    if bridge_dist < BRIDGE_MIN_KM or bridge_dist > BRIDGE_MAX_KM:
+                        break
     
-    def _select_alternatives(self, route: Route, num_alternatives: int = 10):
+    def _select_alternatives(self, route: Route, num_alternatives: int = NUM_ALTERNATIVES):
         """
         Select alternative/backup waypoints near the route.
-        These are WPs not included in the main 100 that are close
-        to the route and can substitute a primary WP if needed.
+
+        Distribution rule: inversely proportional to days remaining
+        (= proportional to day_num, triangular weighting).
+
+        For num_alternatives=10 and 4 days:
+          triangular(4) = 4*5/2 = 10
+          day 1 quota = round(10 * 1/10) = 1
+          day 2 quota = round(10 * 2/10) = 2
+          day 3 quota = round(10 * 3/10) = 3
+          day 4 quota = round(10 * 4/10) = 4   → total = 10
+
+        Works for any number of days and any num_alternatives.
         """
+        n_days = len(route.days)
+        tri = n_days * (n_days + 1) // 2        # triangular number = sum(1..n_days)
+
+        # Compute per-day quota; ensure sum == num_alternatives
+        raw = [num_alternatives * d / tri for d in range(1, n_days + 1)]
+        quotas = [max(0, round(v)) for v in raw]
+        # Fix rounding drift: add/remove from the last (heaviest) day
+        diff = num_alternatives - sum(quotas)
+        quotas[-1] += diff
+
+        max_per_day = {day.day_number: quotas[idx] for idx, day in enumerate(route.days)}
+        day_counts  = {day.day_number: 0 for day in route.days}
+
+        print(f"[Optimizer] Alternative quota per giorno: "
+              + ", ".join(f"G{d}:{max_per_day[d]}" for d in sorted(max_per_day)))
+
         # Collect all selected WP IDs
-        selected_ids = set()
-        for day in route.days:
-            for wp in day.waypoints:
-                selected_ids.add(wp.id)
-        
+        selected_ids = {wp.id for day in route.days for wp in day.waypoints}
+
         # For each non-selected WP, find its minimum distance to any route WP
-        route_wps = route.all_waypoints
         candidates = []
-        
         for wp in self.all_waypoints:
             if wp.id in selected_ids:
                 continue
-            
-            # Find nearest route WP and which day it belongs to
             min_dist = float('inf')
-            near_day = 1
-            
+            near_day = route.days[0].day_number
             for day in route.days:
                 for rwp in day.waypoints:
                     d = haversine_km(wp.lat, wp.lon, rwp.lat, rwp.lon)
                     if d < min_dist:
                         min_dist = d
                         near_day = day.day_number
-            
             candidates.append((wp, min_dist, near_day))
-        
-        # Sort by distance to route (closest first)
+
+        # Sort by proximity to route (closest first within each day bucket)
         candidates.sort(key=lambda x: x[1])
-        
-        # Ascending distribution: more alternatives on later days
-        # Day 1: 1, Day 2: 2, Day 3: 3, Day 4: 4 = 10 total
+
         alternatives = []
-        day_counts = {1: 0, 2: 0, 3: 0, 4: 0}
-        max_per_day = {1: 1, 2: 2, 3: 3, 4: 4}
-        
-        # First pass: ascending distribution
+
+        # First pass: fill each day up to its quota (closest WPs first)
         for wp, dist, near_day in candidates:
             if len(alternatives) >= num_alternatives:
                 break
-            if day_counts.get(near_day, 0) < max_per_day.get(near_day, 1):
-                wp.description = f"ALT Giorno {near_day} — {wp.description}" if wp.description else f"WP alternativo Giorno {near_day}"
+            quota = max_per_day.get(near_day, 0)
+            if day_counts.get(near_day, 0) < quota:
+                wp.description = (
+                    f"ALT Giorno {near_day} — {wp.description}"
+                    if wp.description else f"WP alternativo Giorno {near_day}"
+                )
                 alternatives.append(wp)
                 day_counts[near_day] = day_counts.get(near_day, 0) + 1
-        
-        # Second pass: fill remaining slots regardless of day
+
+        # Second pass: fill remaining slots (e.g. sparse days) with closest unused WPs
         if len(alternatives) < num_alternatives:
-            alt_ids = set(wp.id for wp in alternatives)
+            alt_ids = {wp.id for wp in alternatives}
             for wp, dist, near_day in candidates:
                 if len(alternatives) >= num_alternatives:
                     break
                 if wp.id not in alt_ids:
-                    wp.description = f"ALT Giorno {near_day} — {wp.description}" if wp.description else f"WP alternativo Giorno {near_day}"
+                    wp.description = (
+                        f"ALT Giorno {near_day} — {wp.description}"
+                        if wp.description else f"WP alternativo Giorno {near_day}"
+                    )
                     alternatives.append(wp)
-        
+                    alt_ids.add(wp.id)
+
         route.alternatives = alternatives
-        print(f"[Optimizer] Selezionati {len(alternatives)} WP alternativi")
+        dist_summary = {d: sum(1 for wp in alternatives
+                               if f"Giorno {d}" in (wp.description or ""))
+                        for d in range(1, n_days + 1)}
+        print(f"[Optimizer] Selezionati {len(alternatives)} WP alternativi: "
+              + ", ".join(f"G{d}:{dist_summary[d]}" for d in sorted(dist_summary)))
     
+    def _extract_regions(self, route: Route) -> list[str]:
+        """Extract unique region/province names from route waypoints."""
+        regions = set()
+        for wp in route.all_waypoints:
+            if wp.province:
+                regions.add(wp.province)
+        return sorted(regions)
+
     def _recalculate_day(self, day: DaySegment):
         """Recalculate day statistics after WP reordering."""
         if not day.waypoints:
@@ -722,6 +863,73 @@ class RouteOptimizer:
                 self._progress(f"OSRM: {done}/{total_segments} segmenti", pct)
         
         self.routing.save()
+
+
+def generate_gpx_day(route: Route, day_num: int) -> bytes:
+    """
+    Generate GPX bytes for a single day.
+    Waypoint naming: WP{number} G{day} {pos_in_day}/{total_global}
+    e.g.  "WP001 G1 05/100"
+    """
+    import xml.etree.ElementTree as ET
+    from datetime import datetime
+
+    day_idx = day_num - 1
+    if day_idx < 0 or day_idx >= len(route.days):
+        raise ValueError(f"Giorno {day_num} non esiste")
+
+    day = route.days[day_idx]
+    total_global = route.total_waypoints
+
+    # Global position counter: sum of WPs in previous days
+    global_offset = sum(len(route.days[i].waypoints) for i in range(day_idx))
+
+    gpx = ET.Element('gpx', {
+        'xmlns': 'http://www.topografix.com/GPX/1/1',
+        'version': '1.1',
+        'creator': 'Centopassi Route Planner',
+    })
+
+    metadata = ET.SubElement(gpx, 'metadata')
+    name_el = ET.SubElement(metadata, 'name')
+    name_el.text = f"Centopassi 2026 - Giorno {day_num} ({day.total_km:.0f} km)"
+    time_el = ET.SubElement(metadata, 'time')
+    time_el.text = datetime.now().isoformat()
+
+    # Waypoints with full naming
+    for seq_in_day, wp in enumerate(day.waypoints, start=1):
+        global_pos = global_offset + seq_in_day
+        wpt = ET.SubElement(gpx, 'wpt', {'lat': str(wp.lat), 'lon': str(wp.lon)})
+        ET.SubElement(wpt, 'ele').text = str(wp.elevation)
+        ET.SubElement(wpt, 'name').text = f"WP{wp.number} G{day_num} {seq_in_day:02d}/{total_global}"
+        ET.SubElement(wpt, 'desc').text = (
+            f"Giorno {day_num} | Pos {seq_in_day}/{len(day.waypoints)} | "
+            f"Gara {global_pos}/{total_global}"
+            + (f" | {wp.city}" if wp.city else "")
+            + (f" ({wp.province})" if wp.province else "")
+            + (f" | {wp.description}" if wp.description else "")
+        )
+        sym = ET.SubElement(wpt, 'sym')
+        if wp.is_golden_point:
+            sym.text = 'Flag, Red'
+        elif wp.is_unpaved:
+            sym.text = 'Flag, Orange'
+        else:
+            sym.text = 'Flag, Blue'
+
+    # Track
+    trk = ET.SubElement(gpx, 'trk')
+    ET.SubElement(trk, 'name').text = f"Giorno {day_num} - {day.start_time}/{day.end_time} - {day.total_km:.0f} km"
+    trkseg = ET.SubElement(trk, 'trkseg')
+    for seg in day.segments:
+        for point in seg.geometry:
+            ET.SubElement(trkseg, 'trkpt', {'lat': str(point[0]), 'lon': str(point[1])})
+
+    tree = ET.ElementTree(gpx)
+    ET.indent(tree, space="  ")
+    buf = io.BytesIO()
+    tree.write(buf, encoding='utf-8', xml_declaration=True)
+    return buf.getvalue()
 
 
 def generate_gpx_export(route: Route, filename: str = "percorso_centopassi.gpx"):
