@@ -100,8 +100,8 @@ GRAPHHOPPER_AVOID    = ['motorway', 'toll']  # Maps to Italian autostrade + peda
 
 # ── Flask ───────────────────────────────────────────────────
 FLASK_HOST = "0.0.0.0"
-FLASK_PORT = 5000
-FLASK_DEBUG = True
+FLASK_PORT = int(_os.environ.get('PORT', 5000))
+FLASK_DEBUG = _os.environ.get('FLASK_ENV', 'development') != 'production'
 
 # ── Road Intelligence (Claude API) ─────────────────────────
 ANTHROPIC_API_KEY_ENV = 'ANTHROPIC_API_KEY'

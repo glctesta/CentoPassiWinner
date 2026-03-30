@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: centopassiwinner
+    env: python
+    region: frankfurt
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --workers 2 --timeout 120 --bind 0.0.0.0:$PORT
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false        # inserisci manualmente nella dashboard Render
+      - key: GRAPHHOPPER_API_KEY
+        sync: false        # opzionale
+      - key: FLASK_ENV
+        value: production
