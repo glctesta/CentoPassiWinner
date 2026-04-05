@@ -11,11 +11,13 @@ const state = {
     routeLayers: [],
     finishMarker: null,
     finishCoords: null,
+    startMarker: null,
+    startCoords: null,
     selectedDay: null,
     routeResult: null,
     isOptimizing: false,
     pollInterval: null,
-    mode: 'explore', // 'explore' | 'set-finish' | 'results'
+    mode: 'explore', // 'explore' | 'set-finish' | 'set-start' | 'results'
     unpavedMode: 'limit', // 'allow' | 'limit' | 'exclude'
 };
 
@@ -175,6 +177,8 @@ function initMap() {
     state.map.on('click', (e) => {
         if (state.mode === 'set-finish') {
             setFinishPoint(e.latlng.lat, e.latlng.lng);
+        } else if (state.mode === 'set-start') {
+            setStartPoint(e.latlng.lat, e.latlng.lng);
         }
     });
 }
@@ -446,6 +450,122 @@ function enableSetFinish() {
     state.map.getContainer().style.cursor = 'crosshair';
 }
 
+// ── Start Point ─────────────────────────────────────────────
+
+function enableSetStart() {
+    state.mode = 'set-start';
+    document.getElementById('map-instruction').style.display = 'block';
+    document.getElementById('map-instruction').querySelector('.inst-text').textContent =
+        '🚩 Clicca sulla mappa per posizionare il Punto di Partenza';
+    state.map.getContainer().style.cursor = 'crosshair';
+}
+
+function setStartPoint(lat, lng) {
+    state.startCoords = { lat, lng };
+    state.mode = 'explore';
+    document.getElementById('map-instruction').style.display = 'none';
+    state.map.getContainer().style.cursor = '';
+
+    document.getElementById('start-lat').value = lat.toFixed(6);
+    document.getElementById('start-lon').value = lng.toFixed(6);
+
+    if (state.startMarker) state.map.removeLayer(state.startMarker);
+
+    const startIcon = L.divIcon({
+        html: '<div style="font-size:28px;text-shadow:0 2px 8px rgba(0,0,0,0.5);">🚩</div>',
+        iconSize: [32, 32],
+        iconAnchor: [8, 32],
+        className: 'start-icon',
+    });
+
+    state.startMarker = L.marker([lat, lng], { icon: startIcon, draggable: true })
+        .addTo(state.map)
+        .bindPopup(`<div class="popup-title">🚩 Punto di Partenza</div>
+            <div class="popup-info">${lat.toFixed(5)}, ${lng.toFixed(5)}<br>
+            <em style="color:#94a3b8;font-size:11px;">Il waypoint più vicino valido verrà usato come partenza</em></div>`)
+        .openPopup();
+
+    state.startMarker.on('dragend', (e) => {
+        const pos = e.target.getLatLng();
+        state.startCoords = { lat: pos.lat, lng: pos.lng };
+        document.getElementById('start-lat').value = pos.lat.toFixed(6);
+        document.getElementById('start-lon').value = pos.lng.toFixed(6);
+    });
+
+    document.getElementById('start-hint').innerHTML =
+        `✅ Partenza fissata a ${lat.toFixed(4)}, ${lng.toFixed(4)} — il waypoint più vicino valido verrà selezionato.`;
+    document.getElementById('start-hint').style.color = '#22c55e';
+}
+
+function setStartFromInputs() {
+    const lat = parseFloat(document.getElementById('start-lat').value);
+    const lon = parseFloat(document.getElementById('start-lon').value);
+    if (!isNaN(lat) && !isNaN(lon)) {
+        setStartPoint(lat, lon);
+        state.map.setView([lat, lon], 10);
+    } else {
+        alert('Inserisci coordinate latitudine e longitudine valide');
+    }
+}
+
+function clearStart() {
+    state.startCoords = null;
+    if (state.startMarker) { state.map.removeLayer(state.startMarker); state.startMarker = null; }
+    document.getElementById('start-lat').value = '';
+    document.getElementById('start-lon').value = '';
+    document.getElementById('start-name').value = '';
+    const hint = document.getElementById('start-hint');
+    hint.textContent = 'Se non specificato, il punto di partenza viene scelto automaticamente tra i waypoint (max 450 km dal traguardo, min 15 km dal 1° passo).';
+    hint.style.color = '';
+}
+
+async function geocodeStart() {
+    const query = document.getElementById('start-name').value.trim();
+    if (!query) { alert('Inserisci un nome città o indirizzo di partenza'); return; }
+
+    const statusEl = document.getElementById('geocode-start-status');
+    statusEl.style.display = 'block';
+    statusEl.textContent = '🔍 Ricerca in corso...';
+    statusEl.style.color = '#94a3b8';
+
+    try {
+        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=it&limit=5&addressdetails=1`;
+        const res = await fetch(url, { headers: { 'Accept-Language': 'it' } });
+        const results = await res.json();
+
+        if (results.length === 0) {
+            const url2 = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&addressdetails=1`;
+            const res2 = await fetch(url2, { headers: { 'Accept-Language': 'it' } });
+            const results2 = await res2.json();
+            if (results2.length === 0) {
+                statusEl.textContent = '❌ Nessun risultato trovato';
+                statusEl.style.color = '#ef4444';
+                return;
+            }
+            applyGeocodeStartResult(results2[0], statusEl);
+        } else {
+            applyGeocodeStartResult(results[0], statusEl);
+        }
+    } catch(e) {
+        statusEl.textContent = '❌ Errore di rete: ' + e.message;
+        statusEl.style.color = '#ef4444';
+    }
+}
+
+function applyGeocodeStartResult(result, statusEl) {
+    const lat = parseFloat(result.lat);
+    const lon = parseFloat(result.lon);
+    document.getElementById('start-lat').value = lat.toFixed(6);
+    document.getElementById('start-lon').value = lon.toFixed(6);
+
+    const displayName = result.display_name.split(',').slice(0, 3).join(',');
+    statusEl.textContent = `✅ ${displayName}`;
+    statusEl.style.color = '#22c55e';
+
+    setStartPoint(lat, lon);
+    state.map.setView([lat, lon], 12, { animate: true });
+}
+
 function setFinishPoint(lat, lng) {
     state.finishCoords = { lat, lng };
     state.mode = 'explore';
@@ -553,6 +673,23 @@ async function startOptimization() {
     const useOsrm = document.getElementById('use-osrm').checked;
     const finishName = document.getElementById('finish-name').value || 'Traguardo';
     const maxUnpaved = parseInt(document.getElementById('max-unpaved').value) || 10;
+    const startName = document.getElementById('start-name').value || null;
+
+    // Build payload — start coords only if user set them
+    const payload = {
+        finish_lat: state.finishCoords.lat,
+        finish_lon: state.finishCoords.lng,
+        finish_name: finishName,
+        use_osrm: useOsrm,
+        unpaved_mode: state.unpavedMode,
+        max_unpaved: maxUnpaved,
+        check_road_closures: document.getElementById('check-roads').checked,
+    };
+    if (state.startCoords) {
+        payload.start_lat = state.startCoords.lat;
+        payload.start_lon = state.startCoords.lng;
+        payload.start_name = startName;
+    }
 
     // UI updates
     document.getElementById('btn-optimize').disabled = true;
@@ -564,15 +701,7 @@ async function startOptimization() {
         const res = await fetch('/api/optimize', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                finish_lat: state.finishCoords.lat,
-                finish_lon: state.finishCoords.lng,
-                finish_name: finishName,
-                use_osrm: useOsrm,
-                unpaved_mode: state.unpavedMode,
-                max_unpaved: maxUnpaved,
-                check_road_closures: document.getElementById('check-roads').checked,
-            }),
+            body: JSON.stringify(payload),
         });
 
         if (!res.ok) {
@@ -779,6 +908,63 @@ function displayRouteDetails(route) {
         }
     }
 
+    // Speed compliance panel
+    const compSection = document.getElementById('speed-compliance-section');
+    const compBody = document.getElementById('speed-compliance-body');
+    if (compSection && compBody && route.compliance) {
+        compSection.style.display = 'block';
+        const c = route.compliance;
+        const cardEl = document.getElementById('speed-compliance-card');
+        const allOk = c.ok;
+        cardEl.style.borderLeft = allOk ? '3px solid #22c55e' : '3px solid #ef4444';
+
+        const badge = allOk
+            ? `<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600;">✅ CONFORME</span>`
+            : `<span style="background:rgba(239,68,68,0.15);color:#ef4444;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600;">⚠️ ATTENZIONE</span>`;
+
+        const dayRows = c.days.map((d, i) => {
+            const ok = d.compliant;
+            const speedColor = ok ? '#22c55e' : '#ef4444';
+            const penaltyText = ok ? '—' : `-${d.penalty_points} pt`;
+            return `
+                <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+                    <td style="padding:6px 4px;color:${['#6366f1','#06b6d4','#f59e0b','#ef4444'][i]};">G${d.day}</td>
+                    <td style="padding:6px 4px;">${d.km} km</td>
+                    <td style="padding:6px 4px;">${d.driving_hours}h</td>
+                    <td style="padding:6px 4px;color:${speedColor};font-weight:600;">${d.avg_speed_kmh} km/h</td>
+                    <td style="padding:6px 4px;color:${ok ? '#22c55e' : '#ef4444'};font-weight:600;">${penaltyText}</td>
+                </tr>`;
+        }).join('');
+
+        compBody.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                <span style="color:var(--text-muted);font-size:13px;">Limite: <strong style="color:var(--text-primary);">${c.max_avg_speed_kmh} km/h</strong> media/giorno (Regola 6.2)</span>
+                ${badge}
+            </div>
+            <table style="width:100%;font-size:13px;border-collapse:collapse;">
+                <thead>
+                    <tr style="color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;">
+                        <th style="padding:4px;text-align:left;">Giorno</th>
+                        <th style="padding:4px;text-align:left;">Km</th>
+                        <th style="padding:4px;text-align:left;">Ore guida</th>
+                        <th style="padding:4px;text-align:left;">Velocità media</th>
+                        <th style="padding:4px;text-align:left;">Penalità</th>
+                    </tr>
+                </thead>
+                <tbody>${dayRows}</tbody>
+            </table>
+            ${!allOk ? `
+            <div style="margin-top:10px;padding:8px;background:rgba(239,68,68,0.1);border-radius:6px;font-size:12px;color:#ef4444;">
+                ⚠️ Penalità totale stimata: <strong>${c.total_penalty_points} pt</strong><br>
+                ${c.warnings.map(w => `<div style="margin-top:4px;opacity:.8;">• ${w}</div>`).join('')}
+            </div>` : `
+            <div style="margin-top:10px;padding:8px;background:rgba(34,197,94,0.1);border-radius:6px;font-size:12px;color:#22c55e;">
+                ✅ Tutti i giorni rispettano il limite di ${c.max_avg_speed_kmh} km/h — nessuna penalità velocità.
+            </div>`}`;
+    } else if (compSection) {
+        compSection.style.display = 'none';
+    }
+
     // Day cards
     const daysContainer = document.getElementById('days-container');
     daysContainer.innerHTML = '';
@@ -796,6 +982,12 @@ function displayRouteDetails(route) {
                 <span>⭐ ${day.golden_points_count} GP</span>
                 <span>⏱️ ${day.total_hours.toFixed(1)}h</span>
                 <span>⏰ ${day.start_time}–${day.end_time}</span>
+                ${(() => {
+                    const drivingHours = [13.25, 16.25, 16.25, 12.5][idx];
+                    const avgSpeed = drivingHours > 0 ? day.total_km / drivingHours : 0;
+                    const overLimit = avgSpeed > 47;
+                    return `<span style="color:${overLimit ? '#ef4444' : '#22c55e'};font-weight:600;" title="Velocità media giornaliera (km totali / ore disponibili)">⚡ ${avgSpeed.toFixed(1)} km/h${overLimit ? ' ⚠️' : ''}</span>`;
+                })()}
                 ${day.unpaved_segments > 0 ? `<span class="warning-badge unpaved">🔶 ${day.unpaved_segments} sterrati</span>` : ''}
                 ${day.road_warnings && day.road_warnings.length > 0 ? `<span class="warning-badge road-closure">⚠️ ${day.road_warnings.length} avvisi</span>` : ''}
             </div>

@@ -24,16 +24,22 @@ FINISH_WINDOW_END = "17:45"     # Last day arrival window
 DRIVING_HOURS = [13.25, 16.25, 16.25, 12.5]
 
 # ── Speed & Distance ────────────────────────────────────────
-AVERAGE_SPEED_KMH = 46          # Realistic average speed on mountain roads
-MIN_SPEED_KMH = 45
-MAX_SPEED_KMH = 55
-BREAK_TIME_HOURS = 1.5          # 90 minutes total breaks per day (eat, drink, fuel)
-# Per-day max km: (driving_hours - breaks) * avg_speed
-# Day 1: (13.25 - 1.5) * 46 = 540.5 km
-# Day 2: (16.25 - 1.5) * 46 = 678.5 km
-# Day 3: (16.25 - 1.5) * 46 = 678.5 km
-# Day 4: (12.50 - 1.5) * 46 = 506.0 km
+# REGOLA 6.2: penalità 1pt/km/h per ogni km/h di velocità MEDIA giornaliera oltre il limite
+MAX_ALLOWED_AVG_SPEED_KMH = 47  # Velocità media massima giornaliera (km totali giorno / ore guida)
+AVERAGE_SPEED_KMH = 44          # Velocità media di pianificazione (sotto il limite per margine sicurezza ~6%)
+MAX_ROAD_SPEED_KMH = 120        # Limite di velocità stradale (strade statali italiane)
+BREAK_TIME_HOURS = 1.5          # 90 minuti di pause giornaliere (rifornimento, pasti, ecc.)
+
+# Per-day max km pianificati: (ore_guida - pause) * velocità_media_pianificazione
+# Day 1: (13.25 - 1.5) * 44 = 517.0 km  [hard cap @ 47 km/h: 13.25 × 47 = 622.75 km]
+# Day 2: (16.25 - 1.5) * 44 = 649.0 km  [hard cap @ 47 km/h: 16.25 × 47 = 763.75 km]
+# Day 3: (16.25 - 1.5) * 44 = 649.0 km  [hard cap @ 47 km/h: 16.25 × 47 = 763.75 km]
+# Day 4: (12.50 - 1.5) * 44 = 484.0 km  [hard cap @ 47 km/h: 12.50 × 47 = 587.50 km]
 MAX_KM_PER_DAY_LIST = [(h - BREAK_TIME_HOURS) * AVERAGE_SPEED_KMH for h in DRIVING_HOURS]
+
+# Hard cap assoluto: km pianificati per giorno non devono mai superare ore × 47 km/h
+# (se superato, si accumula penalità = 1 punto × km/h di eccesso × ore)
+MAX_KM_HARD_LIMIT_PER_DAY = [MAX_ALLOWED_AVG_SPEED_KMH * h for h in DRIVING_HOURS]
 MIN_TOTAL_KM = 1600             # Minimum total route (art. 1.1)
 MAX_START_DISTANCE_KM = 450     # Max start distance from finish (art. 6.2)
 

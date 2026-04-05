@@ -150,6 +150,7 @@ class Route:
     finish_point: dict = field(default_factory=dict)  # {lat, lon, name}
     alternatives: list = field(default_factory=list)  # List[Waypoint] - backup WPs
     road_warnings: list = field(default_factory=list)  # Global road intelligence warnings
+    compliance: dict = field(default_factory=dict)  # Speed compliance check results
 
     @property
     def total_km(self) -> float:
@@ -242,6 +243,7 @@ class Route:
             'days': [d.to_dict() for d in self.days],
             'alternatives': [wp.to_dict() for wp in self.alternatives],
             'road_warnings': self.road_warnings,
+            'compliance': self.compliance,
         }
 
 

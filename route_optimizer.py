@@ -9,10 +9,10 @@ from typing import Optional
 from models import Waypoint, RouteSegment, DaySegment, Route, haversine_km
 from routing_service import RoutingService
 from config import (
-    TARGET_WAYPOINTS, MAX_KM_PER_DAY_LIST, MIN_TOTAL_KM,
+    TARGET_WAYPOINTS, MAX_KM_PER_DAY_LIST, MAX_KM_HARD_LIMIT_PER_DAY, MIN_TOTAL_KM,
     MAX_START_DISTANCE_KM, MIN_START_DISTANCE_KM,
     DRIVING_HOURS, DAY1_START_TIME, OTHER_DAYS_START_TIME,
-    REST_START_TIME, FINISH_WINDOW_START, AVERAGE_SPEED_KMH,
+    REST_START_TIME, FINISH_WINDOW_START, AVERAGE_SPEED_KMH, MAX_ALLOWED_AVG_SPEED_KMH,
     BONUS_100TH_DISTANCE_KM, HAVERSINE_ROAD_FACTOR,
     BRIDGE_MIN_KM, BRIDGE_MAX_KM,
     NUM_ALTERNATIVES,
@@ -44,54 +44,74 @@ class RouteOptimizer:
         else:
             print(f"[Optimizer] {message} ({percent}%)")
     
-    def optimize(self, finish_lat: float, finish_lon: float, 
+    def optimize(self, finish_lat: float, finish_lon: float,
                  finish_name: str = "Traguardo",
                  use_osrm_routing: bool = False,
                  unpaved_mode: str = UNPAVED_LIMIT,
-                 max_unpaved: int = 10) -> Route:
+                 max_unpaved: int = 10,
+                 start_lat: float = None,
+                 start_lon: float = None,
+                 start_name: str = None) -> Route:
         """
         Main optimization: find best route of 100 waypoints in 4 days.
-        
+
         Args:
             finish_lat, finish_lon: arrival/finish point coordinates
             finish_name: name of finish location
             use_osrm_routing: if True, use OSRM for exact distances (slower)
             unpaved_mode: 'allow', 'limit', or 'exclude'
             max_unpaved: max unpaved WPs when mode='limit'
-        
+            start_lat, start_lon: optional custom start coordinates (user-defined)
+            start_name: optional label for the custom start point
+
         Returns:
             Route object with 4 DaySegments
         """
         self._progress("Inizializzazione ottimizzazione...", 0)
-        
+
         finish_point = {'lat': finish_lat, 'lon': finish_lon, 'name': finish_name}
-        
-        # Step 1: Find valid start points (within 450 km air from finish)
-        self._progress("Ricerca punti di partenza validi...", 5)
-        start_candidates = self._find_start_candidates(finish_lat, finish_lon)
-        
-        if not start_candidates:
-            raise ValueError(
-                f"Nessun waypoint trovato entro {MAX_START_DISTANCE_KM} km dal traguardo. "
-                f"Verificare le coordinate del traguardo."
+
+        # ── Step 1: Determine start candidates ─────────────────────────
+        if start_lat is not None and start_lon is not None:
+            # User provided a custom start → find the nearest valid waypoint to it
+            self._progress("Ricerca waypoint più vicino al punto di partenza indicato...", 5)
+            custom_start_wp = self._find_nearest_waypoint_to_start(
+                start_lat, start_lon, finish_lat, finish_lon, start_name
             )
-        
-        self._progress(f"Trovati {len(start_candidates)} punti di partenza candidati", 10)
-        
-        # Step 2: Try multiple start points and pick the best route
+            if custom_start_wp is None:
+                raise ValueError(
+                    "Il punto di partenza indicato non è valido: nessun waypoint nelle vicinanze "
+                    f"rispetta le regole (distanza dal traguardo ≤ {MAX_START_DISTANCE_KM} km, "
+                    f"distanza dal 1° passo ≥ {MIN_START_DISTANCE_KM} km)."
+                )
+            candidates_to_try = [custom_start_wp]
+            self._progress(
+                f"Partenza fissata: WP {custom_start_wp.number} "
+                f"({custom_start_wp.city or custom_start_wp.description[:30]}) "
+                f"— {haversine_km(start_lat, start_lon, custom_start_wp.lat, custom_start_wp.lon):.1f} km dal punto indicato",
+                10
+            )
+        else:
+            # Auto-select start from valid candidates
+            self._progress("Ricerca punti di partenza validi...", 5)
+            start_candidates = self._find_start_candidates(finish_lat, finish_lon)
+            if not start_candidates:
+                raise ValueError(
+                    f"Nessun waypoint trovato entro {MAX_START_DISTANCE_KM} km dal traguardo. "
+                    f"Verificare le coordinate del traguardo."
+                )
+            self._progress(f"Trovati {len(start_candidates)} punti di partenza candidati", 10)
+            start_candidates.sort(key=lambda wp: -wp.distance_to(
+                Waypoint(id=-1, name="finish", lat=finish_lat, lon=finish_lon)
+            ))
+            candidates_to_try = self._select_diverse_starts(
+                start_candidates, finish_lat, finish_lon, max_tries=5
+            )
+
+        # ── Step 2: Try start candidates and pick the best route ────────
         best_route = None
         best_score = -1
-        
-        # Try top N start candidates (sorted by distance from finish, farthest first)
-        start_candidates.sort(key=lambda wp: -wp.distance_to(
-            Waypoint(id=-1, name="finish", lat=finish_lat, lon=finish_lon)
-        ))
-        
-        # Take candidates spread across the distance range
-        candidates_to_try = self._select_diverse_starts(
-            start_candidates, finish_lat, finish_lon, max_tries=5
-        )
-        
+
         for idx, start_wp in enumerate(candidates_to_try):
             pct = 10 + int(70 * idx / len(candidates_to_try))
             self._progress(
@@ -177,9 +197,84 @@ class RouteOptimizer:
             f"{len(best_route.alternatives)} alternativi",
             100
         )
-        
+
+        # ── Step final: Compliance check velocità media 47 km/h ─────────
+        best_route.compliance = self._check_speed_compliance(best_route)
+
         return best_route
-    
+
+    def _find_nearest_waypoint_to_start(self, start_lat: float, start_lon: float,
+                                         finish_lat: float, finish_lon: float,
+                                         start_name: str = None) -> Optional['Waypoint']:
+        """
+        Trova il waypoint più vicino alle coordinate di partenza indicate dall'utente,
+        verificando che rispetti le regole del regolamento:
+        - distanza dal traguardo ≤ MAX_START_DISTANCE_KM (450 km)
+        - distanza minima ≥ MIN_START_DISTANCE_KM (15 km) dal traguardo
+        Restituisce il waypoint valido più vicino (entro 100 km dal punto indicato).
+        """
+        SEARCH_RADIUS_KM = 100  # Raggio di ricerca attorno al punto indicato
+        candidates = []
+        for wp in self.all_waypoints:
+            dist_to_user_point = haversine_km(wp.lat, wp.lon, start_lat, start_lon)
+            dist_to_finish = haversine_km(wp.lat, wp.lon, finish_lat, finish_lon)
+            if (dist_to_user_point <= SEARCH_RADIUS_KM and
+                    dist_to_finish <= MAX_START_DISTANCE_KM and
+                    dist_to_finish >= MIN_START_DISTANCE_KM):
+                candidates.append((dist_to_user_point, wp))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda x: x[0])
+        nearest_wp = candidates[0][1]
+        # Sovrascrive il nome del punto di partenza se fornito
+        if start_name:
+            nearest_wp._custom_start_label = start_name
+        return nearest_wp
+
+    def _check_speed_compliance(self, route: 'Route') -> dict:
+        """
+        Verifica la compliance con la regola della velocità media massima di 47 km/h.
+
+        Regola 6.2: penalità = 1 punto × (km/h_eccesso) per ogni km/h oltre il limite.
+        La velocità media giornaliera = km_totali_giorno / ore_guida_disponibili.
+
+        Returns:
+            dict con per ogni giorno lo stato di compliance e l'eventuale penalità stimata.
+        """
+        result = {
+            'ok': True,
+            'max_avg_speed_kmh': MAX_ALLOWED_AVG_SPEED_KMH,
+            'days': [],
+            'total_penalty_points': 0,
+            'warnings': [],
+        }
+        for i, day in enumerate(route.days):
+            driving_hours = DRIVING_HOURS[i]
+            day_km = day.total_km
+            avg_speed = day_km / driving_hours if driving_hours > 0 else 0
+            excess_kmh = max(0.0, avg_speed - MAX_ALLOWED_AVG_SPEED_KMH)
+            # Penalità stimata: 1pt × km/h eccesso (il regolamento dice "per ogni km/h oltre")
+            penalty = int(excess_kmh)
+            day_result = {
+                'day': i + 1,
+                'km': round(day_km, 1),
+                'driving_hours': driving_hours,
+                'avg_speed_kmh': round(avg_speed, 2),
+                'excess_kmh': round(excess_kmh, 2),
+                'penalty_points': penalty,
+                'compliant': excess_kmh == 0,
+            }
+            result['days'].append(day_result)
+            if excess_kmh > 0:
+                result['ok'] = False
+                result['total_penalty_points'] += penalty
+                result['warnings'].append(
+                    f"Giorno {i+1}: velocità media {avg_speed:.1f} km/h "
+                    f"(limite {MAX_ALLOWED_AVG_SPEED_KMH} km/h) "
+                    f"— eccesso {excess_kmh:.1f} km/h → penalità stimata {penalty} pt"
+                )
+        return result
+
     def _find_start_candidates(self, finish_lat: float, finish_lon: float) -> list[Waypoint]:
         """Find waypoints within MAX_START_DISTANCE_KM (air) from finish."""
         candidates = []

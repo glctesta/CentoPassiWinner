@@ -201,6 +201,11 @@ def api_optimize():
     unpaved_mode = data.get('unpaved_mode', 'limit')
     max_unpaved = int(data.get('max_unpaved', 10))
     check_roads = data.get('check_road_closures', False)
+
+    # Punto di partenza personalizzato (opzionale)
+    start_lat = float(data['start_lat']) if 'start_lat' in data and data['start_lat'] is not None else None
+    start_lon = float(data['start_lon']) if 'start_lon' in data and data['start_lon'] is not None else None
+    start_name = data.get('start_name', None)
     
     _optimization_status = {
         'running': True, 'message': 'Avvio...', 'percent': 0,
@@ -231,7 +236,10 @@ def api_optimize():
             route = optimizer.optimize(finish_lat, finish_lon, finish_name,
                                        use_osrm_routing=use_osrm,
                                        unpaved_mode=unpaved_mode,
-                                       max_unpaved=max_unpaved)
+                                       max_unpaved=max_unpaved,
+                                       start_lat=start_lat,
+                                       start_lon=start_lon,
+                                       start_name=start_name)
             
             _optimization_status['result'] = route.to_dict()
             _optimization_status['message'] = 'Completato!'

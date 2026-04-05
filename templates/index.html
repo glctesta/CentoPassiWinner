@@ -118,6 +118,44 @@
                     <div id="search-results" class="search-results"></div>
                 </div>
                 <div class="card">
+                    <div class="card-title"><span class="icon">🚩</span> Punto di Partenza</div>
+
+                    <div class="input-group">
+                        <label for="start-name">Città / Indirizzo di partenza <span style="color:var(--text-muted);font-size:11px;">(opzionale)</span></label>
+                        <div style="display:flex;gap:6px;">
+                            <input type="text" id="start-name" placeholder="Es. Torino, Milano, ..." style="flex:1"
+                                   onkeydown="if(event.key==='Enter'){event.preventDefault();geocodeStart()}">
+                            <button class="btn btn-primary" onclick="geocodeStart()" style="width:auto;padding:8px 14px;" title="Cerca indirizzo">🔍</button>
+                        </div>
+                        <div id="geocode-start-status" class="hint" style="margin-top:4px;display:none"></div>
+                    </div>
+
+                    <div class="input-row">
+                        <div class="input-group">
+                            <label for="start-lat">Latitudine</label>
+                            <input type="number" id="start-lat" step="0.000001" placeholder="Auto">
+                        </div>
+                        <div class="input-group">
+                            <label for="start-lon">Longitudine</label>
+                            <input type="number" id="start-lon" step="0.000001" placeholder="Auto">
+                        </div>
+                    </div>
+
+                    <div style="display:flex;gap:8px;margin-top:8px;">
+                        <button class="btn btn-secondary" id="btn-set-start-coords" style="flex:1;" onclick="setStartFromInputs()">
+                            📌 Usa Coordinate
+                        </button>
+                        <button class="btn btn-primary" id="btn-set-start" style="flex:1;" onclick="enableSetStart()">
+                            🗺️ Clicca su Mappa
+                        </button>
+                        <button class="btn btn-secondary" id="btn-clear-start" style="width:auto;padding:8px 10px;" onclick="clearStart()" title="Rimuovi partenza personalizzata">✕</button>
+                    </div>
+                    <div class="hint" id="start-hint">
+                        Se non specificato, il punto di partenza viene scelto automaticamente tra i waypoint (max 450 km dal traguardo, min 15 km dal 1° passo).
+                    </div>
+                </div>
+
+                <div class="card">
                     <div class="card-title"><span class="icon">🏁</span> Punto di Arrivo (Traguardo)</div>
                     
                     <div class="input-group">
@@ -228,6 +266,14 @@
 
                     <!-- Road Warnings (populated by JS) -->
                     <div id="road-warnings-section" style="display:none;"></div>
+
+                    <!-- Speed Compliance Panel -->
+                    <div id="speed-compliance-section" style="display:none;">
+                        <div class="card" id="speed-compliance-card">
+                            <div class="card-title"><span class="icon">⚡</span> Verifica Velocità Media</div>
+                            <div id="speed-compliance-body"></div>
+                        </div>
+                    </div>
 
                     <!-- Route Summary -->
                     <div class="card">
