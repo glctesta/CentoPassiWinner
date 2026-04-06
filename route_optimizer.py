@@ -5,6 +5,7 @@ Selects 100 waypoints and organizes them into a 4-day route.
 import io
 import math
 import random
+import threading
 from typing import Optional
 from models import Waypoint, RouteSegment, DaySegment, Route, haversine_km
 from routing_service import RoutingService
@@ -32,13 +33,24 @@ class RouteOptimizer:
         self.routing = routing or RoutingService(use_osrm=False)
         self._progress_callback = None
         self.road_intelligence = None  # Set externally for road closure checks
+        self._cancelled = threading.Event()
     
     def set_progress_callback(self, callback):
         """Set a callback function(message, percent) for progress updates."""
         self._progress_callback = callback
     
+    def cancel(self):
+        """Signal the optimizer to stop as soon as possible."""
+        self._cancelled.set()
+
+    def _check_cancelled(self):
+        """Raise if cancellation was requested."""
+        if self._cancelled.is_set():
+            raise RuntimeError("Ottimizzazione annullata.")
+
     def _progress(self, message: str, percent: int = 0):
         """Report progress."""
+        self._check_cancelled()
         if self._progress_callback:
             self._progress_callback(message, percent)
         else:
@@ -384,11 +396,11 @@ class RouteOptimizer:
             remaining_wps = TARGET_WAYPOINTS - (total_selected_count + len(day_wps))
             remaining_days = 4 - day_num + 1
             
-            while (day_km < max_km_today * 0.92 and 
+            while (day_km < max_km_today * 0.92 and
                    day_hours < max_hours * 0.92 and
                    total_selected_count + len(day_wps) < TARGET_WAYPOINTS and
                    available):
-                
+                self._check_cancelled()
                 # Target per-WP spacing that ensures MIN_TOTAL_KM is reached
                 # If running short on km, prefer more distant WPs
                 progress_km_ratio = day_km / max(max_km_today, 1)
@@ -775,7 +787,10 @@ class RouteOptimizer:
             next_day = route.days[day_idx + 1]
             day_limit = MAX_KM_PER_DAY_LIST[day_idx] if day_idx < len(MAX_KM_PER_DAY_LIST) else MAX_KM_PER_DAY_LIST[-1]
 
-            while day.total_km > day_limit and len(day.waypoints) > 3:
+            max_moves = len(day.waypoints)
+            moves = 0
+            while day.total_km > day_limit and len(day.waypoints) > 3 and moves < max_moves:
+                moves += 1
                 # Remove last WP from this day, add to start of next day
                 moved_wp = day.waypoints.pop()
                 next_day.waypoints.insert(0, moved_wp)
@@ -944,15 +959,16 @@ class RouteOptimizer:
             day.total_hours = 0
             
             for seg in day.segments:
+                self._check_cancelled()
                 route_info = self.routing.get_route(seg.from_wp, seg.to_wp)
                 seg.distance_km = route_info['distance_km']
                 seg.duration_hours = route_info['duration_hours']
                 seg.geometry = route_info['geometry']
                 seg.road_distance_km = route_info['distance_km']
-                
+
                 day.total_km += seg.distance_km
                 day.total_hours += seg.duration_hours
-                
+
                 done += 1
                 pct = 90 + int(10 * done / total_segments)
                 self._progress(f"OSRM: {done}/{total_segments} segmenti", pct)

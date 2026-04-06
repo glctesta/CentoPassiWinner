@@ -34,10 +34,13 @@ _stats = None
 _regions = None
 _loaded_filename = None  # Track which file is loaded
 _optimization_status = {'running': False, 'message': '', 'percent': 0, 'result': None, 'error': None}
+_current_optimizer = None      # Reference to running optimizer (for cancellation)
 
 # Route editor state (populated after optimization)
 _current_route = None          # Route object for live editing
 _available_wp_ids = set()      # WP IDs not yet assigned to any day
+
+OPTIMIZATION_TIMEOUT_SEC = 300  # 5 minutes max
 
 # Road routing computation status (async, separate from optimization)
 _routing_status = {
@@ -213,25 +216,26 @@ def api_optimize():
     }
     
     def run_optimization():
-        global _optimization_status, _current_route, _available_wp_ids
+        global _optimization_status, _current_route, _available_wp_ids, _current_optimizer
         try:
             wps = get_waypoints()
             if not wps:
                 raise ValueError("Nessun waypoint caricato. Caricare prima un file GPX o XLSX.")
-            
+
             routing = RoutingService(use_osrm=use_osrm)
             optimizer = RouteOptimizer(wps, routing)
+            _current_optimizer = optimizer
 
             if check_roads:
                 from road_intelligence import RoadIntelligence
                 ri = RoadIntelligence()
                 if ri.enabled:
                     optimizer.road_intelligence = ri
-            
+
             def progress_cb(message, percent):
                 _optimization_status['message'] = message
                 _optimization_status['percent'] = percent
-            
+
             optimizer.set_progress_callback(progress_cb)
             route = optimizer.optimize(finish_lat, finish_lon, finish_name,
                                        use_osrm_routing=use_osrm,
@@ -240,7 +244,7 @@ def api_optimize():
                                        start_lat=start_lat,
                                        start_lon=start_lon,
                                        start_name=start_name)
-            
+
             _optimization_status['result'] = route.to_dict()
             _optimization_status['message'] = 'Completato!'
             _optimization_status['percent'] = 100
@@ -253,16 +257,25 @@ def api_optimize():
             # Save GPX (legacy single-file)
             export_path = os.path.join(os.path.dirname(__file__), 'percorso_centopassi.gpx')
             generate_gpx_export(route, export_path)
-            
+
         except Exception as e:
             _optimization_status['error'] = str(e)
             _optimization_status['message'] = f'Errore: {e}'
         finally:
             _optimization_status['running'] = False
-    
+            _current_optimizer = None
+
     thread = threading.Thread(target=run_optimization, daemon=True)
     thread.start()
-    
+
+    # Watchdog: cancel optimizer if it exceeds timeout
+    def watchdog():
+        thread.join(timeout=OPTIMIZATION_TIMEOUT_SEC)
+        if thread.is_alive() and _current_optimizer:
+            _current_optimizer.cancel()
+
+    threading.Thread(target=watchdog, daemon=True).start()
+
     return jsonify({'status': 'started'})
 
 
@@ -275,7 +288,10 @@ def api_optimize_status():
 @app.route('/api/optimize/reset', methods=['POST'])
 def api_optimize_reset():
     """Force-reset a stuck optimization."""
-    global _optimization_status
+    global _optimization_status, _current_optimizer
+    if _current_optimizer:
+        _current_optimizer.cancel()
+        _current_optimizer = None
     _optimization_status = {
         'running': False, 'message': 'Reset manuale', 'percent': 0,
         'result': None, 'error': None
