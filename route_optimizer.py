@@ -16,7 +16,7 @@ from config import (
     REST_START_TIME, FINISH_WINDOW_START, AVERAGE_SPEED_KMH, MAX_ALLOWED_AVG_SPEED_KMH,
     BONUS_100TH_DISTANCE_KM, HAVERSINE_ROAD_FACTOR,
     BRIDGE_MIN_KM, BRIDGE_MAX_KM,
-    NUM_ALTERNATIVES,
+    NUM_ALTERNATIVES, OSRM_RATE_LIMIT_SEC,
 )
 
 # Unpaved mode constants
@@ -133,9 +133,10 @@ class RouteOptimizer:
             )
             
             try:
+                # Always build with haversine (fast); OSRM recalc happens only on best route
                 route = self._build_route(
                     start_wp, finish_lat, finish_lon, finish_name,
-                    use_osrm=use_osrm_routing,
+                    use_osrm=False,
                     unpaved_mode=unpaved_mode,
                     max_unpaved=max_unpaved,
                 )
@@ -198,8 +199,8 @@ class RouteOptimizer:
                     day.road_warnings = day_warnings
                 self._progress(f"Trovati {len(warnings)} avvisi stradali", 92)
 
-        self._progress("Calcolo distanze finali...", 93)
         if use_osrm_routing:
+            self._progress("Ricalcolo distanze stradali con OSRM (può richiedere qualche minuto)...", 85)
             self._recalculate_with_osrm(best_route)
         
         self._progress(
@@ -949,15 +950,22 @@ class RouteOptimizer:
     
     def _recalculate_with_osrm(self, route: Route):
         """Recalculate all segments using OSRM for accurate distances."""
-        self._progress("Calcolo distanze OSRM...", 90)
-        
         total_segments = sum(len(d.segments) for d in route.days)
+        cached = sum(1 for d in route.days for s in d.segments
+                     if self.routing._cache_key(s.from_wp.lat, s.from_wp.lon,
+                                                s.to_wp.lat, s.to_wp.lon) in self.routing.cache)
+        to_fetch = total_segments - cached
+        eta_sec = to_fetch * OSRM_RATE_LIMIT_SEC if to_fetch > 0 else 0
+        self._progress(
+            f"OSRM: {total_segments} segmenti ({cached} in cache, "
+            f"~{int(eta_sec)}s per i restanti {to_fetch})...", 85
+        )
         done = 0
-        
+
         for day in route.days:
             day.total_km = 0
             day.total_hours = 0
-            
+
             for seg in day.segments:
                 self._check_cancelled()
                 route_info = self.routing.get_route(seg.from_wp, seg.to_wp)
@@ -970,8 +978,8 @@ class RouteOptimizer:
                 day.total_hours += seg.duration_hours
 
                 done += 1
-                pct = 90 + int(10 * done / total_segments)
-                self._progress(f"OSRM: {done}/{total_segments} segmenti", pct)
+                pct = 85 + int(14 * done / total_segments)
+                self._progress(f"OSRM: {done}/{total_segments} segmenti calcolati", pct)
         
         self.routing.save()
 
