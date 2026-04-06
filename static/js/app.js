@@ -747,8 +747,19 @@ async function pollOptimizationStatus() {
             state.isOptimizing = false;
 
             if (status.error) {
-                alert(`Errore: ${status.error}`);
-                resetOptimizeButton();
+                // Show error in progress bar area (more visible than alert)
+                document.getElementById('progress-fill').style.width = '100%';
+                document.getElementById('progress-fill').style.background = '#ef4444';
+                document.getElementById('progress-bar-bg').setAttribute('data-percent', '✗');
+                document.getElementById('progress-text').textContent = status.error;
+                document.getElementById('progress-text').style.color = '#ef4444';
+                document.getElementById('progress-elapsed').textContent = '';
+                // Reset after 8 seconds
+                setTimeout(() => {
+                    document.getElementById('progress-fill').style.background = '';
+                    document.getElementById('progress-text').style.color = '';
+                    resetOptimizeButton();
+                }, 8000);
             } else if (status.result) {
                 state.routeResult = status.result;
                 displayRoute(status.result);

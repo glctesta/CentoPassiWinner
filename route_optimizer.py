@@ -185,8 +185,10 @@ class RouteOptimizer:
         
         if not best_route:
             raise ValueError(
-                "Impossibile costruire un percorso valido con i vincoli dati. "
-                "Provare con un punto di arrivo diverso o consentire più sterrati."
+                f"Impossibile costruire un percorso: nessun candidato ha prodotto un percorso "
+                f"(provati {len(candidates_to_try)} punti di partenza, "
+                f"WP totali disponibili: {len(self.all_waypoints)}). "
+                f"Provare con coordinate diverse o consentire più sterrati."
             )
         
         self._progress("Ottimizzazione percorso con 2-opt...", 85)
@@ -499,12 +501,6 @@ class RouteOptimizer:
             if total_selected_count >= TARGET_WAYPOINTS:
                 break
         
-        if total_selected_count < TARGET_WAYPOINTS:
-            self._progress(
-                f"  ⚠ Percorso incompleto: {total_selected_count}/{TARGET_WAYPOINTS} WP, "
-                f"{route.total_km:.0f} km, {len(available)} WP rimasti non raggiungibili",
-                0
-            )
         return route
     
     def _find_next_waypoint(self, current: Waypoint, available: set,
@@ -1025,7 +1021,7 @@ def generate_gpx_day(route: Route, day_num: int) -> bytes:
 
     gpx = ET.Element('gpx', {
         'xmlns': 'http://www.topografix.com/GPX/1/1',
-        'version': '1.3',
+        'version': '1.4',
         'creator': 'Centopassi Route Planner',
     })
 
@@ -1078,7 +1074,7 @@ def generate_gpx_export(route: Route, filename: str = "percorso_centopassi.gpx")
     
     gpx = ET.Element('gpx', {
         'xmlns': 'http://www.topografix.com/GPX/1/1',
-        'version': '1.3',
+        'version': '1.4',
         'creator': 'Centopassi Route Planner',
     })
     
