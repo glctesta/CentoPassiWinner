@@ -6,6 +6,24 @@ from typing import Optional
 import math
 
 
+def _simplify_geometry(coords: list, max_points: int = 60) -> list:
+    """
+    Reduce geometry points using distance-based sampling.
+    Keeps first and last point, samples evenly in between.
+    Keeps the route shape recognizable while cutting JSON size ~90%.
+    """
+    if not coords or len(coords) <= max_points:
+        return coords
+    # Always keep first and last
+    step = max(1, (len(coords) - 1) / (max_points - 1))
+    result = []
+    for i in range(max_points - 1):
+        idx = int(i * step)
+        result.append(coords[idx])
+    result.append(coords[-1])
+    return result
+
+
 @dataclass
 class Waypoint:
     """A single waypoint (pass/mountain pass) from the GPX file."""
@@ -92,7 +110,7 @@ class RouteSegment:
             'distance_km':    round(self.distance_km, 1),
             'duration_hours': round(self.duration_hours, 2),
             'is_unpaved':     self.is_unpaved,
-            'geometry':       self.geometry,
+            'geometry':       _simplify_geometry(self.geometry),
             'routing_source': self.routing_source,
             'road_violations': self.road_violations,
             'has_real_routing': self.has_real_routing,
