@@ -696,6 +696,11 @@ async function startOptimization() {
     document.getElementById('btn-optimize').innerHTML = '<span class="spinner"></span> Ottimizzazione...';
     const progContainer = document.getElementById('progress-container');
     progContainer.classList.add('active');
+    document.getElementById('progress-fill').style.width = '0%';
+    document.getElementById('progress-bar-bg').setAttribute('data-percent', '0%');
+    document.getElementById('progress-text').textContent = 'Avvio...';
+    document.getElementById('progress-elapsed').textContent = '';
+    state.optimizeStartTime = Date.now();
 
     try {
         const res = await fetch('/api/optimize', {
@@ -723,8 +728,19 @@ async function pollOptimizationStatus() {
         const status = await res.json();
 
         // Update progress
-        document.getElementById('progress-fill').style.width = `${status.percent}%`;
+        const pct = status.percent || 0;
+        document.getElementById('progress-fill').style.width = `${pct}%`;
+        document.getElementById('progress-bar-bg').setAttribute('data-percent', `${pct}%`);
         document.getElementById('progress-text').textContent = status.message;
+
+        // Elapsed time
+        if (state.optimizeStartTime) {
+            const elapsed = Math.floor((Date.now() - state.optimizeStartTime) / 1000);
+            const min = Math.floor(elapsed / 60);
+            const sec = elapsed % 60;
+            document.getElementById('progress-elapsed').textContent =
+                `Tempo trascorso: ${min > 0 ? min + 'm ' : ''}${sec}s`;
+        }
 
         if (!status.running) {
             clearInterval(state.pollInterval);
@@ -755,6 +771,11 @@ function resetOptimizeButton() {
     document.getElementById('btn-optimize').disabled = false;
     document.getElementById('btn-optimize').innerHTML = '🚀 Calcola Percorso';
     state.isOptimizing = false;
+    state.optimizeStartTime = null;
+    // Hide progress after a short delay so user can see 100%
+    setTimeout(() => {
+        document.getElementById('progress-container').classList.remove('active');
+    }, 2000);
 }
 
 // ── Display Route ───────────────────────────────────────────
