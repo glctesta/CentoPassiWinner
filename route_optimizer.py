@@ -48,13 +48,16 @@ class RouteOptimizer:
         if self._cancelled.is_set():
             raise RuntimeError("Ottimizzazione annullata.")
 
-    def _progress(self, message: str, percent: int = 0):
-        """Report progress."""
+    def _progress(self, message: str, percent: int = -1):
+        """Report progress. Percent never goes backwards."""
         self._check_cancelled()
+        if percent >= 0:
+            self._last_percent = max(getattr(self, '_last_percent', 0), percent)
+        pct = getattr(self, '_last_percent', 0)
         if self._progress_callback:
-            self._progress_callback(message, percent)
+            self._progress_callback(message, pct)
         else:
-            print(f"[Optimizer] {message} ({percent}%)")
+            print(f"[Optimizer] {message} ({pct}%)")
     
     def optimize(self, finish_lat: float, finish_lon: float,
                  finish_name: str = "Traguardo",
@@ -418,6 +421,11 @@ class RouteOptimizer:
                    total_selected_count + len(day_wps) < TARGET_WAYPOINTS and
                    available):
                 self._check_cancelled()
+                # Update progress: show which day and how many WPs found so far
+                built_wps = total_selected_count + len(day_wps)
+                self._progress(
+                    f"Giorno {day_num}/4 — {built_wps} WP selezionati, {day_km:.0f} km"
+                )
                 # Target per-WP spacing that ensures MIN_TOTAL_KM is reached
                 # If running short on km, prefer more distant WPs
                 progress_km_ratio = day_km / max(max_km_today, 1)
@@ -1021,7 +1029,7 @@ def generate_gpx_day(route: Route, day_num: int) -> bytes:
 
     gpx = ET.Element('gpx', {
         'xmlns': 'http://www.topografix.com/GPX/1/1',
-        'version': '1.4',
+        'version': '1.5',
         'creator': 'Centopassi Route Planner',
     })
 
@@ -1074,7 +1082,7 @@ def generate_gpx_export(route: Route, filename: str = "percorso_centopassi.gpx")
     
     gpx = ET.Element('gpx', {
         'xmlns': 'http://www.topografix.com/GPX/1/1',
-        'version': '1.4',
+        'version': '1.5',
         'creator': 'Centopassi Route Planner',
     })
     
