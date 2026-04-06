@@ -1029,7 +1029,7 @@ def generate_gpx_day(route: Route, day_num: int) -> bytes:
 
     gpx = ET.Element('gpx', {
         'xmlns': 'http://www.topografix.com/GPX/1/1',
-        'version': '1.5',
+        'version': '1.6',
         'creator': 'Centopassi Route Planner',
     })
 
@@ -1082,7 +1082,7 @@ def generate_gpx_export(route: Route, filename: str = "percorso_centopassi.gpx")
     
     gpx = ET.Element('gpx', {
         'xmlns': 'http://www.topografix.com/GPX/1/1',
-        'version': '1.5',
+        'version': '1.6',
         'creator': 'Centopassi Route Planner',
     })
     

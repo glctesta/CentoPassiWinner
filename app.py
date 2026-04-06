@@ -233,6 +233,7 @@ def api_optimize():
                     optimizer.road_intelligence = ri
 
             def progress_cb(message, percent):
+                print(f"[PROGRESS] {percent}% — {message}", flush=True)
                 _optimization_status['message'] = message
                 _optimization_status['percent'] = percent
 
@@ -259,11 +260,16 @@ def api_optimize():
             generate_gpx_export(route, export_path)
 
         except Exception as e:
+            import traceback
+            traceback.print_exc()
+            print(f"[OPTIMIZE ERROR] {e}", flush=True)
             _optimization_status['error'] = str(e)
             _optimization_status['message'] = f'Errore: {e}'
+            _optimization_status['percent'] = -1  # Signal error to frontend
         finally:
             _optimization_status['running'] = False
             _current_optimizer = None
+            print(f"[OPTIMIZE DONE] status={_optimization_status}", flush=True)
 
     thread = threading.Thread(target=run_optimization, daemon=True)
     thread.start()

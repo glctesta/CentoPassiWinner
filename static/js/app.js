@@ -697,8 +697,10 @@ async function startOptimization() {
     const progContainer = document.getElementById('progress-container');
     progContainer.classList.add('active');
     document.getElementById('progress-fill').style.width = '0%';
+    document.getElementById('progress-fill').style.background = '';
     document.getElementById('progress-bar-bg').setAttribute('data-percent', '0%');
-    document.getElementById('progress-text').textContent = 'Avvio...';
+    document.getElementById('progress-text').innerHTML = 'Avvio...';
+    document.getElementById('progress-text').style.color = '';
     document.getElementById('progress-elapsed').textContent = '';
     state.optimizeStartTime = Date.now();
 
@@ -727,51 +729,50 @@ async function pollOptimizationStatus() {
         const res = await fetch('/api/optimize/status');
         const status = await res.json();
 
-        // Update progress
-        const pct = status.percent || 0;
+        if (!status.running) {
+            clearInterval(state.pollInterval);
+            state.isOptimizing = false;
+
+            if (status.error) {
+                // Show error prominently — stays visible until user clicks "Calcola" again
+                document.getElementById('progress-fill').style.width = '100%';
+                document.getElementById('progress-fill').style.background = '#ef4444';
+                document.getElementById('progress-bar-bg').setAttribute('data-percent', 'ERRORE');
+                document.getElementById('progress-text').innerHTML =
+                    '<strong style="color:#ef4444">⚠ ' + status.error + '</strong>';
+                document.getElementById('progress-elapsed').textContent = '';
+                // Re-enable button but keep error visible
+                document.getElementById('btn-optimize').disabled = false;
+                document.getElementById('btn-optimize').innerHTML = '🚀 Calcola Percorso';
+                state.optimizeStartTime = null;
+            } else if (status.result) {
+                document.getElementById('progress-fill').style.width = '100%';
+                document.getElementById('progress-bar-bg').setAttribute('data-percent', '100%');
+                document.getElementById('progress-text').textContent = 'Completato!';
+                state.routeResult = status.result;
+                displayRoute(status.result);
+                resetOptimizeButton();
+                document.getElementById('btn-export').style.display = 'flex';
+                document.getElementById('routing-section').style.display = 'block';
+                document.getElementById('editor-section').style.display = 'block';
+                editor.reset();
+                fetch('/api/route/routing-stats').then(r=>r.json()).then(s=>displayRoutingStats(s)).catch(()=>{});
+            }
+            return;
+        }
+
+        // Still running — update progress
+        const pct = Math.max(0, status.percent || 0);
         document.getElementById('progress-fill').style.width = `${pct}%`;
         document.getElementById('progress-bar-bg').setAttribute('data-percent', `${pct}%`);
-        document.getElementById('progress-text').textContent = status.message;
+        document.getElementById('progress-text').textContent = status.message || 'Elaborazione...';
 
-        // Elapsed time
         if (state.optimizeStartTime) {
             const elapsed = Math.floor((Date.now() - state.optimizeStartTime) / 1000);
             const min = Math.floor(elapsed / 60);
             const sec = elapsed % 60;
             document.getElementById('progress-elapsed').textContent =
                 `Tempo trascorso: ${min > 0 ? min + 'm ' : ''}${sec}s`;
-        }
-
-        if (!status.running) {
-            clearInterval(state.pollInterval);
-            state.isOptimizing = false;
-
-            if (status.error) {
-                // Show error in progress bar area (more visible than alert)
-                document.getElementById('progress-fill').style.width = '100%';
-                document.getElementById('progress-fill').style.background = '#ef4444';
-                document.getElementById('progress-bar-bg').setAttribute('data-percent', '✗');
-                document.getElementById('progress-text').textContent = status.error;
-                document.getElementById('progress-text').style.color = '#ef4444';
-                document.getElementById('progress-elapsed').textContent = '';
-                // Reset after 8 seconds
-                setTimeout(() => {
-                    document.getElementById('progress-fill').style.background = '';
-                    document.getElementById('progress-text').style.color = '';
-                    resetOptimizeButton();
-                }, 8000);
-            } else if (status.result) {
-                state.routeResult = status.result;
-                displayRoute(status.result);
-                resetOptimizeButton();
-                document.getElementById('btn-export').style.display = 'flex';
-                // Show routing + editor sections
-                document.getElementById('routing-section').style.display = 'block';
-                document.getElementById('editor-section').style.display = 'block';
-                editor.reset();
-                // Load initial routing stats
-                fetch('/api/route/routing-stats').then(r=>r.json()).then(s=>displayRoutingStats(s)).catch(()=>{});
-            }
         }
     } catch (err) {
         console.error('Poll error:', err);
@@ -783,6 +784,8 @@ function resetOptimizeButton() {
     document.getElementById('btn-optimize').innerHTML = '🚀 Calcola Percorso';
     state.isOptimizing = false;
     state.optimizeStartTime = null;
+    document.getElementById('progress-fill').style.background = '';
+    document.getElementById('progress-text').style.color = '';
     // Hide progress after a short delay so user can see 100%
     setTimeout(() => {
         document.getElementById('progress-container').classList.remove('active');
