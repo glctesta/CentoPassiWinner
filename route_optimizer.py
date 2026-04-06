@@ -152,7 +152,7 @@ class RouteOptimizer:
             # Fallback: relax constraints and try again
             self._progress("Rilassamento vincoli e nuovo tentativo...", 80)
             best_route = self._build_route_relaxed(
-                start_candidates, finish_lat, finish_lon, finish_name,
+                candidates_to_try, finish_lat, finish_lon, finish_name,
                 unpaved_mode=unpaved_mode, max_unpaved=max_unpaved,
             )
         
