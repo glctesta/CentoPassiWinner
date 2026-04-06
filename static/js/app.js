@@ -741,22 +741,32 @@ async function pollOptimizationStatus() {
                 document.getElementById('progress-text').innerHTML =
                     '<strong style="color:#ef4444">⚠ ' + status.error + '</strong>';
                 document.getElementById('progress-elapsed').textContent = '';
-                // Re-enable button but keep error visible
                 document.getElementById('btn-optimize').disabled = false;
                 document.getElementById('btn-optimize').innerHTML = '🚀 Calcola Percorso';
                 state.optimizeStartTime = null;
-            } else if (status.result) {
+            } else if (status.has_result) {
                 document.getElementById('progress-fill').style.width = '100%';
                 document.getElementById('progress-bar-bg').setAttribute('data-percent', '100%');
-                document.getElementById('progress-text').textContent = 'Completato!';
-                state.routeResult = status.result;
-                displayRoute(status.result);
-                resetOptimizeButton();
-                document.getElementById('btn-export').style.display = 'flex';
-                document.getElementById('routing-section').style.display = 'block';
-                document.getElementById('editor-section').style.display = 'block';
-                editor.reset();
-                fetch('/api/route/routing-stats').then(r=>r.json()).then(s=>displayRoutingStats(s)).catch(()=>{});
+                document.getElementById('progress-text').textContent = 'Caricamento risultato...';
+                // Fetch full result once (separate from polling)
+                try {
+                    const resultRes = await fetch('/api/optimize/result');
+                    const result = await resultRes.json();
+                    document.getElementById('progress-text').textContent = 'Completato!';
+                    state.routeResult = result;
+                    displayRoute(result);
+                    resetOptimizeButton();
+                    document.getElementById('btn-export').style.display = 'flex';
+                    document.getElementById('routing-section').style.display = 'block';
+                    document.getElementById('editor-section').style.display = 'block';
+                    editor.reset();
+                    fetch('/api/route/routing-stats').then(r=>r.json()).then(s=>displayRoutingStats(s)).catch(()=>{});
+                } catch (loadErr) {
+                    document.getElementById('progress-text').innerHTML =
+                        '<strong style="color:#ef4444">⚠ Errore caricamento risultato: ' + loadErr.message + '</strong>';
+                    document.getElementById('btn-optimize').disabled = false;
+                    document.getElementById('btn-optimize').innerHTML = '🚀 Calcola Percorso';
+                }
             }
             return;
         }

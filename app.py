@@ -287,8 +287,22 @@ def api_optimize():
 
 @app.route('/api/optimize/status')
 def api_optimize_status():
-    """Get current optimization status."""
-    return jsonify(_optimization_status)
+    """Get current optimization status (lightweight — no route data)."""
+    return jsonify({
+        'running': _optimization_status['running'],
+        'message': _optimization_status['message'],
+        'percent': _optimization_status['percent'],
+        'error':   _optimization_status.get('error'),
+        'has_result': _optimization_status.get('result') is not None,
+    })
+
+
+@app.route('/api/optimize/result')
+def api_optimize_result():
+    """Get full optimization result (called once after completion)."""
+    if _optimization_status.get('result'):
+        return jsonify(_optimization_status['result'])
+    return jsonify({'error': 'Nessun risultato disponibile'}), 404
 
 
 @app.route('/api/optimize/reset', methods=['POST'])
