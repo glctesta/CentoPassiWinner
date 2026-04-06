@@ -123,6 +123,8 @@ class RouteOptimizer:
         # ── Step 2: Try start candidates and pick the best route ────────
         best_route = None
         best_score = -1
+        best_fallback = None       # Best partial route (< 100 WP or < 1600 km)
+        best_fallback_wps = 0
 
         for idx, start_wp in enumerate(candidates_to_try):
             pct = 10 + int(70 * idx / len(candidates_to_try))
@@ -131,7 +133,7 @@ class RouteOptimizer:
                 f"partenza da WP {start_wp.number} ({start_wp.city or start_wp.description[:30]})",
                 pct
             )
-            
+
             try:
                 # Always build with haversine (fast); OSRM recalc happens only on best route
                 route = self._build_route(
@@ -140,34 +142,46 @@ class RouteOptimizer:
                     unpaved_mode=unpaved_mode,
                     max_unpaved=max_unpaved,
                 )
-                
-                if route and route.total_waypoints >= TARGET_WAYPOINTS and route.total_km >= MIN_TOTAL_KM:
+
+                if not route or not route.days:
+                    self._progress(f"  → Nessun percorso generato", pct)
+                    continue
+
+                n_wps = route.total_waypoints
+                r_km = route.total_km
+
+                if n_wps >= TARGET_WAYPOINTS and r_km >= MIN_TOTAL_KM:
                     score = self._evaluate_route(route)
                     if score > best_score:
                         best_score = score
                         best_route = route
                         self._progress(
-                            f"  → Percorso trovato: {route.total_km:.0f} km, "
-                            f"{route.total_waypoints} WP, score={score:.0f}",
+                            f"  → Percorso trovato: {r_km:.0f} km, "
+                            f"{n_wps} WP, score={score:.0f}",
                             pct
                         )
-                elif route and route.total_waypoints >= TARGET_WAYPOINTS:
-                    # Route has enough WPs but under 1600 km — keep as fallback
+                else:
                     self._progress(
-                        f"  → Percorso sotto i 1600 km ({route.total_km:.0f} km), scartato",
+                        f"  → Percorso parziale: {n_wps} WP, {r_km:.0f} km",
                         pct
                     )
+                    # Keep best partial route as fallback
+                    if n_wps > best_fallback_wps:
+                        best_fallback_wps = n_wps
+                        best_fallback = route
             except Exception as e:
                 self._progress(f"  → Errore: {e}", pct)
                 continue
-        
-        if not best_route:
-            # Fallback: relax constraints and try again
-            self._progress("Rilassamento vincoli e nuovo tentativo...", 80)
-            best_route = self._build_route_relaxed(
-                candidates_to_try, finish_lat, finish_lon, finish_name,
-                unpaved_mode=unpaved_mode, max_unpaved=max_unpaved,
+
+        if not best_route and best_fallback:
+            n = best_fallback.total_waypoints
+            km = best_fallback.total_km
+            self._progress(
+                f"Nessun percorso perfetto trovato. "
+                f"Uso il migliore disponibile: {n} WP, {km:.0f} km",
+                80
             )
+            best_route = best_fallback
         
         if not best_route:
             raise ValueError(
@@ -485,7 +499,13 @@ class RouteOptimizer:
             if total_selected_count >= TARGET_WAYPOINTS:
                 break
         
-        return route if total_selected_count >= TARGET_WAYPOINTS else None
+        if total_selected_count < TARGET_WAYPOINTS:
+            self._progress(
+                f"  ⚠ Percorso incompleto: {total_selected_count}/{TARGET_WAYPOINTS} WP, "
+                f"{route.total_km:.0f} km, {len(available)} WP rimasti non raggiungibili",
+                0
+            )
+        return route
     
     def _find_next_waypoint(self, current: Waypoint, available: set,
                             finish_lat: float, finish_lon: float,
