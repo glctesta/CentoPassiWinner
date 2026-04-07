@@ -1042,10 +1042,13 @@ function displayRouteDetails(route) {
                 <span>⏱️ ${day.total_hours.toFixed(1)}h</span>
                 <span>⏰ ${day.start_time}–${day.end_time}</span>
                 ${(() => {
-                    const drivingHours = [13.25, 16.25, 16.25, 12.5][idx];
+                    const drivingHours = [16.25, 16.25, 16.25, 12.5][idx];
                     const avgSpeed = drivingHours > 0 ? day.total_km / drivingHours : 0;
                     const overLimit = avgSpeed > 47;
-                    return `<span style="color:${overLimit ? '#ef4444' : '#22c55e'};font-weight:600;" title="Velocità media giornaliera (km totali / ore disponibili)">⚡ ${avgSpeed.toFixed(1)} km/h${overLimit ? ' ⚠️' : ''}</span>`;
+                    const overKmCap = day.total_km > 650;
+                    const speedTag = `<span style="color:${overLimit ? '#ef4444' : '#22c55e'};font-weight:600;" title="Velocità media giornaliera (km totali / ore disponibili)">⚡ ${avgSpeed.toFixed(1)} km/h${overLimit ? ' ⚠️' : ''}</span>`;
+                    const kmCapTag = overKmCap ? `<span class="warning-badge" style="background:rgba(239,68,68,0.15);color:#ef4444;">🚫 >${day.total_km.toFixed(0)} km (cap 650)</span>` : '';
+                    return speedTag + (kmCapTag ? ' ' + kmCapTag : '');
                 })()}
                 ${day.unpaved_segments > 0 ? `<span class="warning-badge unpaved">🔶 ${day.unpaved_segments} sterrati</span>` : ''}
                 ${day.road_warnings && day.road_warnings.length > 0 ? `<span class="warning-badge road-closure">⚠️ ${day.road_warnings.length} avvisi</span>` : ''}

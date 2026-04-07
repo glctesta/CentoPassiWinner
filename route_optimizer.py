@@ -10,13 +10,16 @@ from typing import Optional
 from models import Waypoint, RouteSegment, DaySegment, Route, haversine_km
 from routing_service import RoutingService
 from config import (
-    TARGET_WAYPOINTS, MAX_KM_PER_DAY_LIST, MAX_KM_HARD_LIMIT_PER_DAY, MIN_TOTAL_KM,
+    TARGET_WAYPOINTS, MAX_KM_PER_DAY_LIST, MAX_KM_HARD_LIMIT_PER_DAY,
+    MAX_KM_DAY_HARD_CAP, MIN_TOTAL_KM,
     MAX_START_DISTANCE_KM, MIN_START_DISTANCE_KM,
     DRIVING_HOURS, DAY1_START_TIME, OTHER_DAYS_START_TIME,
     REST_START_TIME, FINISH_WINDOW_START, AVERAGE_SPEED_KMH, MAX_ALLOWED_AVG_SPEED_KMH,
     BONUS_100TH_DISTANCE_KM, HAVERSINE_ROAD_FACTOR,
     BRIDGE_MIN_KM, BRIDGE_MAX_KM,
-    NUM_ALTERNATIVES, OSRM_RATE_LIMIT_SEC,
+    NUM_ALTERNATIVES, ALTERNATIVES_PER_DAY,
+    DEFAULT_UNPAVED_MODE, DEFAULT_MAX_UNPAVED,
+    OSRM_RATE_LIMIT_SEC,
 )
 
 # Unpaved mode constants
@@ -385,8 +388,8 @@ class RouteOptimizer:
                 day.start_time = OTHER_DAYS_START_TIME
                 max_hours = DRIVING_HOURS[day_num - 1]
             
-            # Per-day km limit based on (driving_hours - breaks) * avg_speed
-            max_km_today = MAX_KM_PER_DAY_LIST[day_num - 1]
+            # Per-day km limit: rispetta sia il cap regolamentare sia il cap operativo 650 km
+            max_km_today = MAX_KM_PER_DAY_LIST[day_num - 1]  # già min(650, calc)
             day_km = 0.0
             day_hours = 0.0
             day_wps = []
@@ -576,49 +579,46 @@ class RouteOptimizer:
                 continue
             
             # Score components
-            # 1. Proximity score (prefer closer waypoints, normalized)
-            proximity_score = 100.0 / (1.0 + road_dist)
+            # PRIORITÀ 1 — Prossimità (raggiungere i 100 passi è il driver principale)
+            proximity_score = 150.0 / (1.0 + road_dist)
             
-            # 2. Direction score (prefer waypoints that move toward finish)
+            # PRIORITÀ 2 — Direzione verso il traguardo (scala col progresso)
             wp_dist_to_finish = haversine_km(wp.lat, wp.lon, finish_lat, finish_lon)
             
             if progress < 0.3:
-                # Early: explore away from finish to build distance
-                direction_score = (wp_dist_to_finish - dist_to_finish) * 0.1
+                # Fase iniziale: esplora lontano dal traguardo per fare km
+                direction_score = (wp_dist_to_finish - dist_to_finish) * 0.08
             elif progress < 0.7:
-                # Mid: neutral to slight towards finish
-                direction_score = (dist_to_finish - wp_dist_to_finish) * 0.05
+                # Fase centrale: neutrale, lieve avvicinamento
+                direction_score = (dist_to_finish - wp_dist_to_finish) * 0.04
             else:
-                # Late: strongly toward finish
-                direction_score = (dist_to_finish - wp_dist_to_finish) * 0.3
-                
-                # Extra bonus if within 50km of finish near 100th WP
+                # Fase finale: convergenza decisa verso il traguardo
+                direction_score = (dist_to_finish - wp_dist_to_finish) * 0.25
+                # Bonus extra se siamo vicini al 100° passo e al traguardo
                 if total_selected >= 95 and wp_dist_to_finish <= BONUS_100TH_DISTANCE_KM:
                     direction_score += 50
             
-            # 3. Golden Point bonus (slight preference, but not overwhelming)
-            gp_bonus = 5.0 if wp.is_golden_point else 0.0
+            # PRIORITÀ 3 — Golden Point (bonus lieve, non dominante)
+            gp_bonus = 4.0 if wp.is_golden_point else 0.0
             
-            # 4. Unpaved penalty (scaled by mode)
+            # PRIORITÀ 4 — Sterrato: penalità forte (evitare off-road)
+            # Criterio: sterrato rilevante se > 500m off-road o lontano da asfalto
             unpaved_penalty = 0.0
             if wp.is_unpaved:
                 if unpaved_mode == UNPAVED_EXCLUDE:
-                    continue  # Already filtered above, but just in case
+                    continue
                 elif unpaved_mode == UNPAVED_LIMIT:
-                    # Strong penalty as we approach the limit
+                    # Penalità crescente man mano che si avvicina al limite
                     ratio = current_unpaved_count / max(max_unpaved, 1)
-                    unpaved_penalty = -10.0 * (1 + ratio * 3)
+                    unpaved_penalty = -20.0 * (1 + ratio * 4)  # più aggressiva
                 else:  # ALLOW
-                    unpaved_penalty = -3.0
+                    unpaved_penalty = -8.0  # penalità base anche in modalità allow
             
-            # 5. Spread score (prefer keeping travel regular)
-            # If running short on km for 1600 minimum, prefer more distant WPs
-            ideal_dist = 25.0 if need_more_km else 18.0
-            spread_score = -abs(road_dist - ideal_dist) * 0.1
-            
-            # If need more km, also reduce proximity weight to avoid hugging nearby WPs
+            # PRIORITÀ 5 — Distanza ideale per WP (rispettare il budget km)
+            ideal_dist = 28.0 if need_more_km else 20.0
+            spread_score = -abs(road_dist - ideal_dist) * 0.08
             if need_more_km:
-                proximity_score *= 0.5
+                proximity_score *= 0.6  # riduce il pull verso WP vicini
             
             total_score = proximity_score + direction_score + gp_bonus + unpaved_penalty + spread_score
             
@@ -679,39 +679,44 @@ class RouteOptimizer:
         return candidates[0][0]
 
     def _evaluate_route(self, route: Route) -> float:
-        """Score a complete route for comparison."""
+        """
+        Valuta un percorso completo per confronto.
+        
+        PRIORITÀ (in ordine):
+        1. 100 passi raggiunti (eliminatoria se non soddisfatta)
+        2. Rispetto del cap 650 km/giorno e del minimo 1600 km totali
+        3. Sterrati minimizzati
+        4. Punteggio (Golden Points, quota) — secondario
+        """
         score = 0.0
         
-        # Must have 100 WPs
+        # PRIORITÀ 1: 100 WP sono obbligatori (eliminatoria)
         if route.total_waypoints < TARGET_WAYPOINTS:
-            return -1000000
+            return -1_000_000 + route.total_waypoints * 100  # più WP = meno penalità
         
-        # Must be >= 1600 km
+        # PRIORITÀ 2a: km totali ≥ 1600
         if route.total_km < MIN_TOTAL_KM:
-            score -= (MIN_TOTAL_KM - route.total_km) * 100
+            score -= (MIN_TOTAL_KM - route.total_km) * 500  # penalità pesante per km mancanti
         else:
-            score += route.total_km * 0.5
+            score += min(route.total_km - MIN_TOTAL_KM, 400) * 0.3  # bonus moderato per km extra
         
-        # Golden points are valuable
-        score += route.total_golden_points * 1000
-        
-        # Elevation points
-        score += route.total_elevation_delta * 0.5
-        
-        # Balanced days are better
+        # PRIORITÀ 2b: nessun giorno deve superare 650 km
         if route.days:
             km_values = [d.total_km for d in route.days]
-            km_mean = sum(km_values) / len(km_values)
-            km_variance = sum((k - km_mean)**2 for k in km_values) / len(km_values)
-            score -= km_variance * 0.01
-            
-            # Penalize any day exceeding its dynamic km limit
             for day_idx, km in enumerate(km_values):
-                day_limit = MAX_KM_PER_DAY_LIST[day_idx] if day_idx < len(MAX_KM_PER_DAY_LIST) else MAX_KM_PER_DAY_LIST[-1]
+                if km > MAX_KM_DAY_HARD_CAP:
+                    score -= (km - MAX_KM_DAY_HARD_CAP) * 1000  # penalità molto pesante
+                # Penalità anche per superamento del limite pianificato (non solo il cap)
+                day_limit = MAX_KM_PER_DAY_LIST[day_idx] if day_idx < len(MAX_KM_PER_DAY_LIST) else MAX_KM_DAY_HARD_CAP
                 if km > day_limit:
                     score -= (km - day_limit) * 200
-
-            # Penalize bridging violations (days 2-4: first WP must be 20-40 km from prev day's last)
+            
+            # Preferire giorni bilanciati (varianza bassa)
+            km_mean = sum(km_values) / len(km_values)
+            km_variance = sum((k - km_mean)**2 for k in km_values) / len(km_values)
+            score -= km_variance * 0.005
+            
+            # Penalità per violazioni bridge (giorni 2-4: primo WP a 20-40 km dall'ultimo del giorno precedente)
             for i in range(1, len(route.days)):
                 prev_day = route.days[i - 1]
                 curr_day = route.days[i]
@@ -720,20 +725,29 @@ class RouteOptimizer:
                         prev_day.waypoints[-1], curr_day.waypoints[0]
                     )
                     if bridge_dist < BRIDGE_MIN_KM or bridge_dist > BRIDGE_MAX_KM:
-                        score -= 5000
+                        score -= 3000
         
-        # Fewer unpaved segments is better
+        # PRIORITÀ 3: minimizza sterrati
         total_unpaved = sum(d.unpaved_segments for d in route.days)
-        score -= total_unpaved * 50
+        score -= total_unpaved * 200  # penalità per sterrato (era 50)
+        total_unpaved_km = sum(d.unpaved_km for d in route.days)
+        score -= total_unpaved_km * 10
         
-        # 100th WP close to finish for bonus
+        # PRIORITÀ 4 (secondaria): punteggio gara
+        # Golden Points
+        score += route.total_golden_points * 500  # ridotto da 1000
+        
+        # Quota (elevation)
+        score += route.total_elevation_delta * 0.2  # ridotto da 0.5
+        
+        # Bonus 100° passo vicino al traguardo
         if route.all_waypoints:
             last_wp = route.all_waypoints[-1]
             finish_lat = route.finish_point.get('lat', 0)
             finish_lon = route.finish_point.get('lon', 0)
             dist_to_finish = haversine_km(last_wp.lat, last_wp.lon, finish_lat, finish_lon)
             if dist_to_finish <= BONUS_100TH_DISTANCE_KM:
-                score += 50000  # Big bonus for qualifying for the 100K
+                score += 30000  # bonus qualificazione 100K (ridotto da 50K per non distorcere)
         
         return score
     
@@ -802,29 +816,25 @@ class RouteOptimizer:
     
     def _enforce_daily_km_limit(self, route: Route):
         """
-        After 2-opt, ensure no day exceeds its dynamic km limit.
-        Trims excess WPs from the end of an over-limit day
-        and prepends them to the start of the next day.
-        Also respects the bridging constraint (20-40 km between days).
+        Dopo il 2-opt, assicura che nessun giorno superi il limite km.
+        Usa il cap più restrittivo tra MAX_KM_PER_DAY_LIST e MAX_KM_DAY_HARD_CAP (650 km).
+        Sposta i WP in eccesso all'inizio del giorno successivo.
         """
         for day_idx in range(len(route.days) - 1):
             day = route.days[day_idx]
             next_day = route.days[day_idx + 1]
-            day_limit = MAX_KM_PER_DAY_LIST[day_idx] if day_idx < len(MAX_KM_PER_DAY_LIST) else MAX_KM_PER_DAY_LIST[-1]
+            # Usa il cap più basso: pianificato o hard cap 650
+            planned_limit = MAX_KM_PER_DAY_LIST[day_idx] if day_idx < len(MAX_KM_PER_DAY_LIST) else MAX_KM_DAY_HARD_CAP
+            day_limit = min(planned_limit, MAX_KM_DAY_HARD_CAP)
 
             max_moves = len(day.waypoints)
             moves = 0
             while day.total_km > day_limit and len(day.waypoints) > 3 and moves < max_moves:
                 moves += 1
-                # Remove last WP from this day, add to start of next day
                 moved_wp = day.waypoints.pop()
                 next_day.waypoints.insert(0, moved_wp)
-
-                # Recalculate both days
                 self._recalculate_day(day)
                 self._recalculate_day(next_day)
-
-                # Check bridging constraint: if violated, stop moving
                 if day.waypoints and next_day.waypoints:
                     bridge_dist = self.routing.estimate_distance(
                         day.waypoints[-1], next_day.waypoints[0]
@@ -834,31 +844,36 @@ class RouteOptimizer:
     
     def _select_alternatives(self, route: Route, num_alternatives: int = NUM_ALTERNATIVES):
         """
-        Select alternative/backup waypoints near the route.
+        Seleziona WP di riserva (alternative) vicini al percorso.
 
-        Distribution rule: inversely proportional to days remaining
-        (= proportional to day_num, triangular weighting).
+        Distribuzione concentrata negli ULTIMI 2 GIORNI (G3 e G4):
+        - G1: 0, G2: 0, G3: 5, G4: 5
+        Questi WP sono quelli più utili in gara: si usano quando si è già
+        in viaggio e si vuole aggiungere passi nelle ultime tappe.
 
-        For num_alternatives=10 and 4 days:
-          triangular(4) = 4*5/2 = 10
-          day 1 quota = round(10 * 1/10) = 1
-          day 2 quota = round(10 * 2/10) = 2
-          day 3 quota = round(10 * 3/10) = 3
-          day 4 quota = round(10 * 4/10) = 4   → total = 10
-
-        Works for any number of days and any num_alternatives.
+        Se il percorso ha meno di 4 giorni, la distribuzione viene adattata
+        proporzionalmente ai giorni disponibili.
         """
         n_days = len(route.days)
-        tri = n_days * (n_days + 1) // 2        # triangular number = sum(1..n_days)
 
-        # Compute per-day quota; ensure sum == num_alternatives
-        raw = [num_alternatives * d / tri for d in range(1, n_days + 1)]
-        quotas = [max(0, round(v)) for v in raw]
-        # Fix rounding drift: add/remove from the last (heaviest) day
-        diff = num_alternatives - sum(quotas)
-        quotas[-1] += diff
+        # Usa la distribuzione configurata, adattata al numero di giorni reali
+        if n_days == len(ALTERNATIVES_PER_DAY):
+            quotas_list = list(ALTERNATIVES_PER_DAY)
+        else:
+            # Fallback: concentra tutto negli ultimi 2 giorni
+            quotas_list = [0] * n_days
+            if n_days >= 2:
+                half = num_alternatives // 2
+                quotas_list[-1] = num_alternatives - half
+                quotas_list[-2] = half
+            else:
+                quotas_list[-1] = num_alternatives
 
-        max_per_day = {day.day_number: quotas[idx] for idx, day in enumerate(route.days)}
+        # Assicura che la somma sia esatta
+        diff = num_alternatives - sum(quotas_list)
+        quotas_list[-1] += diff  # aggiusta sull'ultimo giorno
+
+        max_per_day = {day.day_number: quotas_list[idx] for idx, day in enumerate(route.days)}
         day_counts  = {day.day_number: 0 for day in route.days}
 
         print(f"[Optimizer] Alternative quota per giorno: "

@@ -202,7 +202,7 @@ def api_optimize():
     finish_name = data.get('finish_name', 'Traguardo')
     use_osrm = data.get('use_osrm', False)
     unpaved_mode = data.get('unpaved_mode', 'limit')
-    max_unpaved = int(data.get('max_unpaved', 10))
+    max_unpaved = int(data.get('max_unpaved', 5))  # default 5 (era 10)
     check_roads = data.get('check_road_closures', False)
 
     # Punto di partenza personalizzato (opzionale)
