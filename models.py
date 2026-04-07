@@ -105,12 +105,14 @@ class RouteSegment:
 
     def to_dict(self) -> dict:
         return {
-            'from_wp':        self.from_wp.to_dict(),
-            'to_wp':          self.to_wp.to_dict(),
+            # Solo ID invece dell'oggetto completo (i WP sono già in day.waypoints)
+            'from_wp_id':     self.from_wp.id,
+            'to_wp_id':       self.to_wp.id,
             'distance_km':    round(self.distance_km, 1),
             'duration_hours': round(self.duration_hours, 2),
             'is_unpaved':     self.is_unpaved,
-            'geometry':       _simplify_geometry(self.geometry),
+            # Max 20 punti per segmento — sufficienti per disegnare il percorso su mappa
+            'geometry':       _simplify_geometry(self.geometry, max_points=20),
             'routing_source': self.routing_source,
             'road_violations': self.road_violations,
             'has_real_routing': self.has_real_routing,
