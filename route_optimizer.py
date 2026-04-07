@@ -123,7 +123,7 @@ class RouteOptimizer:
                 Waypoint(id=-1, name="finish", lat=finish_lat, lon=finish_lon)
             ))
             candidates_to_try = self._select_diverse_starts(
-                start_candidates, finish_lat, finish_lon, max_tries=5
+                start_candidates, finish_lat, finish_lon, max_tries=3  # ridotto da 5
             )
 
         # ── Step 2: Try start candidates and pick the best route ────────
@@ -558,6 +558,7 @@ class RouteOptimizer:
         
         candidates = []
         for wp_id in available:
+            self._check_cancelled()           # ← punto di uscita durante iterazione lunga
             wp = self.all_waypoints[wp_id]
             
             # Skip unpaved if budget exhausted or excluded
@@ -574,8 +575,8 @@ class RouteOptimizer:
         # Sort by distance for efficiency, evaluate top candidates
         candidates.sort(key=lambda x: x[1])
         
-        # Evaluate more candidates early, fewer later
-        max_eval = min(len(candidates), max(20, 50 - int(progress * 30)))
+        # Valuta max 25 candidati (era 50 — ridotto per performance su server free)
+        max_eval = min(len(candidates), 25)
         
         for wp, dist in candidates[:max_eval]:
             road_dist = dist * HAVERSINE_ROAD_FACTOR
@@ -763,7 +764,7 @@ class RouteOptimizer:
                              unpaved_mode: str = UNPAVED_LIMIT,
                              max_unpaved: int = 10) -> Optional[Route]:
         """Try building with relaxed constraints if strict fails."""
-        for wp in start_candidates[:10]:
+        for wp in start_candidates[:4]:  # ridotto da 10
             try:
                 route = self._build_route(
                     wp, finish_lat, finish_lon, finish_name,
@@ -889,19 +890,29 @@ class RouteOptimizer:
         # Collect all selected WP IDs
         selected_ids = {wp.id for day in route.days for wp in day.waypoints}
 
-        # For each non-selected WP, find its minimum distance to any route WP
+        # Per ogni WP non selezionato, trova il giorno del percorso più vicino
+        # Ottimizzazione: usa centroidi per giorno invece di confrontare ogni WP
+        day_centroids = []
+        for day in route.days:
+            if day.waypoints:
+                lat = sum(wp.lat for wp in day.waypoints) / len(day.waypoints)
+                lon = sum(wp.lon for wp in day.waypoints) / len(day.waypoints)
+                day_centroids.append((day.day_number, lat, lon))
+
         candidates = []
-        for wp in self.all_waypoints:
+        for i, wp in enumerate(self.all_waypoints):
+            if i % 50 == 0:
+                self._check_cancelled()       # ← punto di uscita ogni 50 WP
             if wp.id in selected_ids:
                 continue
+            # Trova giorno più vicino usando i centroidi (O(n×giorni) invece di O(n×WP))
             min_dist = float('inf')
             near_day = route.days[0].day_number
-            for day in route.days:
-                for rwp in day.waypoints:
-                    d = haversine_km(wp.lat, wp.lon, rwp.lat, rwp.lon)
-                    if d < min_dist:
-                        min_dist = d
-                        near_day = day.day_number
+            for (day_num, clat, clon) in day_centroids:
+                d = haversine_km(wp.lat, wp.lon, clat, clon)
+                if d < min_dist:
+                    min_dist = d
+                    near_day = day_num
             candidates.append((wp, min_dist, near_day))
 
         # Sort by proximity to route (closest first within each day bucket)

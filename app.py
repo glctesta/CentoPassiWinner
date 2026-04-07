@@ -40,7 +40,7 @@ _current_optimizer = None      # Reference to running optimizer (for cancellatio
 _current_route = None          # Route object for live editing
 _available_wp_ids = set()      # WP IDs not yet assigned to any day
 
-OPTIMIZATION_TIMEOUT_SEC = 300  # 5 minutes max
+OPTIMIZATION_TIMEOUT_SEC = 90   # 90s max — dopo mostra errore chiaro
 
 # Road routing computation status (async, separate from optimization)
 _routing_status = {
@@ -309,6 +309,12 @@ def api_optimize_result():
           f"result_is_none={result is None}", flush=True)
     return jsonify({'error': 'Nessun risultato disponibile. '
                     'Probabilmente l\'ottimizzazione è ancora in corso o è fallita.'}), 404
+
+
+@app.route('/api/ping')
+def api_ping():
+    """Heartbeat endpoint — verifica che il server sia vivo."""
+    return jsonify({'ok': True, 'running': _optimization_status.get('running', False)})
 
 
 @app.route('/api/optimize/reset', methods=['POST'])

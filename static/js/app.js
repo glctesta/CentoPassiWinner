@@ -744,6 +744,16 @@ async function stopOptimization() {
     btn.innerHTML = '⏹ Stop';
     resetOptimizeButton();
 }
+
+async function pollOptimizationStatus() {
+    // Avvisa se non ci sono aggiornamenti da più di 60 secondi
+    if (state.optimizeStartTime) {
+        const elapsed = (Date.now() - state.optimizeStartTime) / 1000;
+        if (elapsed > 60 && elapsed % 30 < 2) {  // ogni 30s dopo il primo minuto
+            document.getElementById('progress-text').textContent =
+                `⏳ Elaborazione in corso... (${Math.floor(elapsed)}s) — premi ⏹ Stop per annullare`;
+        }
+    }
     try {
         const res = await fetch('/api/optimize/status');
         const status = await res.json();
