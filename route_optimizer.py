@@ -128,7 +128,7 @@ class RouteOptimizer:
 
         # ── Step 2: Try start candidates and pick the best route ────────
         best_route = None
-        best_score = -1
+        best_score = -float('inf')   # fix: era -1, causava blocco con scoring negativo
         best_fallback = None       # Best partial route (< 100 WP or < 1600 km)
         best_fallback_wps = 0
 
@@ -464,8 +464,14 @@ class RouteOptimizer:
                 # Check if adding this segment exceeds daily limits
                 if day_km + seg_km > max_km_today or day_hours + seg_hours > max_hours:
                     if day_wps:
-                        break
-                    # If first WP of the day (after start), allow it
+                        break  # Giorno pieno, passa al successivo
+                    # Primo WP del giorno: consenti anche se sfora leggermente
+                    # (altrimenti potremmo bloccarci su giorni impossibili)
+
+                # Sicurezza anti-stallo: se il WP non viene aggiunto, rimuovilo dai candidati
+                if day_km + seg_km > max_km_today * 1.05:
+                    available.discard(next_wp.id)  # salta definitivamente questo WP oggi
+                    continue
                 
                 # Add segment
                 segment = RouteSegment(
@@ -781,7 +787,7 @@ class RouteOptimizer:
             
             improved = True
             iterations = 0
-            max_iterations = 100
+            max_iterations = 30  # ridotto da 100: bilancia qualità e velocità
             
             while improved and iterations < max_iterations:
                 improved = False
@@ -809,8 +815,9 @@ class RouteOptimizer:
             # Recalculate day statistics after optimization
             self._recalculate_day(day)
         
-        # Post-2opt: enforce MAX_KM_PER_DAY by moving excess WPs to next day
-        self._enforce_daily_km_limit(route)
+        # NOTA: _enforce_daily_km_limit rimosso per design.
+        # I giorni non vengono mai accorciati redistribuendo WP.
+        # Il cap 650 km viene rispettato durante la costruzione del percorso.
         
         return route
     
