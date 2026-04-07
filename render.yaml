@@ -6,7 +6,7 @@ services:
     plan: free
     rootDir: .
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --workers 1 --timeout 300 --bind 0.0.0.0:$PORT
+    startCommand: gunicorn app:app --workers 1 --timeout 600 --keep-alive 5 --bind 0.0.0.0:$PORT
     envVars:
       - key: ANTHROPIC_API_KEY
         sync: false        # inserisci manualmente nella dashboard Render

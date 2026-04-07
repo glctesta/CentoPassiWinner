@@ -716,8 +716,8 @@ async function startOptimization() {
             throw new Error(err.error || 'Errore server');
         }
 
-        // Poll for status
-        state.pollInterval = setInterval(pollOptimizationStatus, 1000);
+        // Poll for status every 2s (kinder to Render free tier)
+        state.pollInterval = setInterval(pollOptimizationStatus, 2000);
     } catch (err) {
         alert(`Errore: ${err.message}`);
         resetOptimizeButton();
