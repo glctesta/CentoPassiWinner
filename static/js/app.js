@@ -746,95 +746,92 @@ async function stopOptimization() {
 }
 
 async function pollOptimizationStatus() {
-    // Avvisa se non ci sono aggiornamenti da più di 60 secondi
-    if (state.optimizeStartTime) {
-        const elapsed = (Date.now() - state.optimizeStartTime) / 1000;
-        if (elapsed > 60 && elapsed % 30 < 2) {  // ogni 30s dopo il primo minuto
-            document.getElementById('progress-text').textContent =
-                `⏳ Elaborazione in corso... (${Math.floor(elapsed)}s) — premi ⏹ Stop per annullare`;
-        }
-    }
     try {
         const res = await fetch('/api/optimize/status');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const status = await res.json();
 
-        if (!status.running) {
-            clearInterval(state.pollInterval);
-            state.isOptimizing = false;
-
-            if (status.error) {
-                // Show error prominently — stays visible until user clicks "Calcola" again
-                document.getElementById('progress-fill').style.width = '100%';
-                document.getElementById('progress-fill').style.background = '#ef4444';
-                document.getElementById('progress-bar-bg').setAttribute('data-percent', 'ERRORE');
-                document.getElementById('progress-text').innerHTML =
-                    '<strong style="color:#ef4444">⚠ ' + status.error + '</strong>';
-                document.getElementById('progress-elapsed').textContent = '';
-                document.getElementById('btn-optimize').disabled = false;
-                document.getElementById('btn-optimize').innerHTML = '🚀 Calcola Percorso';
-                state.optimizeStartTime = null;
-            } else if (status.has_result) {
-                document.getElementById('progress-fill').style.width = '100%';
-                document.getElementById('progress-bar-bg').setAttribute('data-percent', '100%');
-                document.getElementById('progress-text').textContent = 'Caricamento risultato...';
-
-                // Retry up to 3 times (guards against transient 404 on slow servers)
-                let result = null;
-                let lastErr = null;
-                for (let attempt = 1; attempt <= 3; attempt++) {
-                    try {
-                        if (attempt > 1) await new Promise(r => setTimeout(r, 800));
-                        const resultRes = await fetch('/api/optimize/result');
-                        if (!resultRes.ok) {
-                            throw new Error(`Server ha risposto ${resultRes.status} (tentativo ${attempt}/3)`);
-                        }
-                        const data = await resultRes.json();
-                        if (!data || !Array.isArray(data.days)) {
-                            throw new Error(data.error || 'Risultato non valido ricevuto dal server');
-                        }
-                        result = data;
-                        break;
-                    } catch (e) {
-                        lastErr = e;
-                    }
-                }
-
-                if (!result) {
-                    document.getElementById('progress-text').innerHTML =
-                        '<strong style="color:#ef4444">⚠ Errore caricamento risultato: ' + lastErr.message + '</strong>';
-                    document.getElementById('btn-optimize').disabled = false;
-                    document.getElementById('btn-optimize').innerHTML = '🚀 Calcola Percorso';
-                    return;
-                }
-
-                document.getElementById('progress-text').textContent = 'Completato!';
-                    state.routeResult = result;
-                    displayRoute(result);
-                    resetOptimizeButton();
-                    document.getElementById('btn-export').style.display = 'flex';
-                    document.getElementById('routing-section').style.display = 'block';
-                    document.getElementById('editor-section').style.display = 'block';
-                    editor.reset();
-                    fetch('/api/route/routing-stats').then(r=>r.json()).then(s=>displayRoutingStats(s)).catch(()=>{});
+        // ── Aggiorna barra mentre gira ─────────────────────────────────
+        if (status.running) {
+            const pct = Math.max(0, status.percent || 0);
+            document.getElementById('progress-fill').style.width = `${pct}%`;
+            document.getElementById('progress-bar-bg').setAttribute('data-percent', `${pct}%`);
+            if (status.message) {
+                document.getElementById('progress-text').textContent = status.message;
+            }
+            if (state.optimizeStartTime) {
+                const elapsed = Math.floor((Date.now() - state.optimizeStartTime) / 1000);
+                const min = Math.floor(elapsed / 60);
+                const sec = elapsed % 60;
+                document.getElementById('progress-elapsed').textContent =
+                    `Tempo trascorso: ${min > 0 ? min + 'm ' : ''}${sec}s`;
             }
             return;
         }
 
-        // Still running — update progress
-        const pct = Math.max(0, status.percent || 0);
-        document.getElementById('progress-fill').style.width = `${pct}%`;
-        document.getElementById('progress-bar-bg').setAttribute('data-percent', `${pct}%`);
-        document.getElementById('progress-text').textContent = status.message || 'Elaborazione...';
+        // ── Ottimizzazione terminata (running = false) ──────────────────
+        clearInterval(state.pollInterval);
 
-        if (state.optimizeStartTime) {
-            const elapsed = Math.floor((Date.now() - state.optimizeStartTime) / 1000);
-            const min = Math.floor(elapsed / 60);
-            const sec = elapsed % 60;
-            document.getElementById('progress-elapsed').textContent =
-                `Tempo trascorso: ${min > 0 ? min + 'm ' : ''}${sec}s`;
+        if (status.error) {
+            // Errore — mostra messaggio rosso
+            document.getElementById('progress-fill').style.width = '100%';
+            document.getElementById('progress-fill').style.background = '#ef4444';
+            document.getElementById('progress-bar-bg').setAttribute('data-percent', 'ERRORE');
+            document.getElementById('progress-text').innerHTML =
+                `<strong style="color:#ef4444">⚠ ${status.error}</strong>`;
+            document.getElementById('progress-elapsed').textContent = '';
+            resetOptimizeButton();
+            return;
         }
+
+        if (status.has_result) {
+            // Successo — carica il risultato
+            document.getElementById('progress-fill').style.width = '100%';
+            document.getElementById('progress-bar-bg').setAttribute('data-percent', '100%');
+            document.getElementById('progress-text').textContent = 'Caricamento risultato...';
+
+            let result = null;
+            let lastErr = null;
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                try {
+                    if (attempt > 1) await new Promise(r => setTimeout(r, 800));
+                    const rRes = await fetch('/api/optimize/result');
+                    if (!rRes.ok) throw new Error(`Server ha risposto ${rRes.status}`);
+                    const data = await rRes.json();
+                    if (!data || !Array.isArray(data.days)) throw new Error(data.error || 'Risultato non valido');
+                    result = data;
+                    break;
+                } catch (e) { lastErr = e; }
+            }
+
+            if (!result) {
+                document.getElementById('progress-text').innerHTML =
+                    `<strong style="color:#ef4444">⚠ Errore caricamento: ${lastErr.message}</strong>`;
+                resetOptimizeButton();
+                return;
+            }
+
+            document.getElementById('progress-text').textContent = 'Completato!';
+            state.routeResult = result;
+            displayRoute(result);
+            resetOptimizeButton();
+            document.getElementById('btn-export').style.display = 'flex';
+            document.getElementById('routing-section').style.display = 'block';
+            document.getElementById('editor-section').style.display = 'block';
+            editor.reset();
+            fetch('/api/route/routing-stats').then(r => r.json()).then(s => displayRoutingStats(s)).catch(() => {});
+            return;
+        }
+
+        // Stato inconsistente (running=false, niente errore, niente risultato)
+        document.getElementById('progress-text').textContent = 'Nessun risultato — riprova.';
+        resetOptimizeButton();
+
     } catch (err) {
-        console.error('Poll error:', err);
+        // Errore di rete — non bloccare la UI, mostra warning
+        console.warn('Poll error:', err);
+        document.getElementById('progress-text').textContent =
+            `⚠ Connessione al server interrotta — riprovo...`;
     }
 }
 
