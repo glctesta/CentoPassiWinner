@@ -751,7 +751,13 @@ async function pollOptimizationStatus() {
                 // Fetch full result once (separate from polling)
                 try {
                     const resultRes = await fetch('/api/optimize/result');
+                    if (!resultRes.ok) {
+                        throw new Error(`Server ha risposto ${resultRes.status}: impossibile caricare il risultato`);
+                    }
                     const result = await resultRes.json();
+                    if (!result || !Array.isArray(result.days)) {
+                        throw new Error(result.error || 'Risultato non valido ricevuto dal server');
+                    }
                     document.getElementById('progress-text').textContent = 'Completato!';
                     state.routeResult = result;
                     displayRoute(result);
@@ -814,7 +820,15 @@ function displayRoute(route) {
         m.setStyle({ opacity: 0.15, fillOpacity: 0.15 });
     });
 
-    // Display each day
+    // Defensive normalization — ensure arrays exist
+    route.days = route.days || [];
+    route.alternatives = route.alternatives || [];
+    route.road_warnings = route.road_warnings || [];
+    route.days.forEach(day => {
+        day.segments = day.segments || [];
+        day.waypoints = day.waypoints || [];
+        day.road_warnings = day.road_warnings || [];
+    });
     route.days.forEach((day, idx) => {
         const color = DAY_COLORS[idx] || '#ffffff';
 
@@ -1333,6 +1347,10 @@ const editor = {
 
         // Dim all base waypoint markers
         state.waypointMarkers.forEach(m => m.setStyle({ opacity: 0.08, fillOpacity: 0.08 }));
+
+        // Defensive normalization
+        route.days = route.days || [];
+        route.days.forEach(d => { d.segments = d.segments || []; d.waypoints = d.waypoints || []; });
 
         // Draw route polylines for all days (dimmed except active)
         state.routeLayers.forEach(l => state.map.removeLayer(l));
