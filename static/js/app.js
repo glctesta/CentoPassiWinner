@@ -748,17 +748,37 @@ async function pollOptimizationStatus() {
                 document.getElementById('progress-fill').style.width = '100%';
                 document.getElementById('progress-bar-bg').setAttribute('data-percent', '100%');
                 document.getElementById('progress-text').textContent = 'Caricamento risultato...';
-                // Fetch full result once (separate from polling)
-                try {
-                    const resultRes = await fetch('/api/optimize/result');
-                    if (!resultRes.ok) {
-                        throw new Error(`Server ha risposto ${resultRes.status}: impossibile caricare il risultato`);
+
+                // Retry up to 3 times (guards against transient 404 on slow servers)
+                let result = null;
+                let lastErr = null;
+                for (let attempt = 1; attempt <= 3; attempt++) {
+                    try {
+                        if (attempt > 1) await new Promise(r => setTimeout(r, 800));
+                        const resultRes = await fetch('/api/optimize/result');
+                        if (!resultRes.ok) {
+                            throw new Error(`Server ha risposto ${resultRes.status} (tentativo ${attempt}/3)`);
+                        }
+                        const data = await resultRes.json();
+                        if (!data || !Array.isArray(data.days)) {
+                            throw new Error(data.error || 'Risultato non valido ricevuto dal server');
+                        }
+                        result = data;
+                        break;
+                    } catch (e) {
+                        lastErr = e;
                     }
-                    const result = await resultRes.json();
-                    if (!result || !Array.isArray(result.days)) {
-                        throw new Error(result.error || 'Risultato non valido ricevuto dal server');
-                    }
-                    document.getElementById('progress-text').textContent = 'Completato!';
+                }
+
+                if (!result) {
+                    document.getElementById('progress-text').innerHTML =
+                        '<strong style="color:#ef4444">⚠ Errore caricamento risultato: ' + lastErr.message + '</strong>';
+                    document.getElementById('btn-optimize').disabled = false;
+                    document.getElementById('btn-optimize').innerHTML = '🚀 Calcola Percorso';
+                    return;
+                }
+
+                document.getElementById('progress-text').textContent = 'Completato!';
                     state.routeResult = result;
                     displayRoute(result);
                     resetOptimizeButton();
@@ -767,12 +787,6 @@ async function pollOptimizationStatus() {
                     document.getElementById('editor-section').style.display = 'block';
                     editor.reset();
                     fetch('/api/route/routing-stats').then(r=>r.json()).then(s=>displayRoutingStats(s)).catch(()=>{});
-                } catch (loadErr) {
-                    document.getElementById('progress-text').innerHTML =
-                        '<strong style="color:#ef4444">⚠ Errore caricamento risultato: ' + loadErr.message + '</strong>';
-                    document.getElementById('btn-optimize').disabled = false;
-                    document.getElementById('btn-optimize').innerHTML = '🚀 Calcola Percorso';
-                }
             }
             return;
         }

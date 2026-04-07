@@ -300,9 +300,15 @@ def api_optimize_status():
 @app.route('/api/optimize/result')
 def api_optimize_result():
     """Get full optimization result (called once after completion)."""
-    if _optimization_status.get('result'):
-        return jsonify(_optimization_status['result'])
-    return jsonify({'error': 'Nessun risultato disponibile'}), 404
+    result = _optimization_status.get('result')
+    if result:
+        return jsonify(result)
+    # Log what's in status to help diagnose 404s
+    print(f"[RESULT 404] running={_optimization_status.get('running')}, "
+          f"error={_optimization_status.get('error')}, "
+          f"result_is_none={result is None}", flush=True)
+    return jsonify({'error': 'Nessun risultato disponibile. '
+                    'Probabilmente l\'ottimizzazione è ancora in corso o è fallita.'}), 404
 
 
 @app.route('/api/optimize/reset', methods=['POST'])
