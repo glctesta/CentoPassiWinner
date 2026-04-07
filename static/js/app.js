@@ -694,6 +694,7 @@ async function startOptimization() {
     // UI updates
     document.getElementById('btn-optimize').disabled = true;
     document.getElementById('btn-optimize').innerHTML = '<span class="spinner"></span> Ottimizzazione...';
+    document.getElementById('btn-stop').style.display = 'block';
     const progContainer = document.getElementById('progress-container');
     progContainer.classList.add('active');
     document.getElementById('progress-fill').style.width = '0%';
@@ -724,7 +725,25 @@ async function startOptimization() {
     }
 }
 
-async function pollOptimizationStatus() {
+async function stopOptimization() {
+    if (!state.isOptimizing) return;
+    const btn = document.getElementById('btn-stop');
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Annullamento...';
+    try {
+        await fetch('/api/optimize/reset', { method: 'POST' });
+    } catch(e) { /* ignore */ }
+    clearInterval(state.pollInterval);
+    document.getElementById('progress-fill').style.width = '100%';
+    document.getElementById('progress-fill').style.background = '#f59e0b';
+    document.getElementById('progress-bar-bg').setAttribute('data-percent', 'ANNULLATO');
+    document.getElementById('progress-text').innerHTML =
+        '<strong style="color:#f59e0b">⏹ Elaborazione annullata</strong>';
+    document.getElementById('progress-elapsed').textContent = '';
+    btn.disabled = false;
+    btn.innerHTML = '⏹ Stop';
+    resetOptimizeButton();
+}
     try {
         const res = await fetch('/api/optimize/status');
         const status = await res.json();
@@ -812,6 +831,7 @@ async function pollOptimizationStatus() {
 function resetOptimizeButton() {
     document.getElementById('btn-optimize').disabled = false;
     document.getElementById('btn-optimize').innerHTML = '🚀 Calcola Percorso';
+    document.getElementById('btn-stop').style.display = 'none';
     state.isOptimizing = false;
     state.optimizeStartTime = null;
     document.getElementById('progress-fill').style.background = '';
@@ -1659,6 +1679,7 @@ function setUnpavedMode(mode) {
 function initControls() {
     document.getElementById('btn-set-finish').addEventListener('click', enableSetFinish);
     document.getElementById('btn-set-coords').addEventListener('click', setFinishFromInputs);
+    document.getElementById('btn-stop').addEventListener('click', stopOptimization);
     document.getElementById('btn-optimize').addEventListener('click', startOptimization);
     document.getElementById('btn-export').addEventListener('click', downloadGPX);
 

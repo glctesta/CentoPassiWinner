@@ -50,7 +50,7 @@
                         ❓ Help
                     </button>
                 </div>
-                <div class="subtitle">Route Planner 2026 — 29 Mag → 1 Giu <span class="version-badge">v2.4</span></div>
+                <div class="subtitle">Route Planner 2026 — 29 Mag → 1 Giu <span class="version-badge">v2.5</span></div>
             </div>
 
             <div class="sidebar-content">
@@ -222,9 +222,14 @@
                         <label for="check-roads">🤖 Verifica chiusure stradali (Claude AI)</label>
                     </div>
                     
-                    <button class="btn btn-primary" id="btn-optimize" disabled>
-                        🚀 Calcola Percorso
-                    </button>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn btn-primary" id="btn-optimize" disabled style="flex:1;">
+                            🚀 Calcola Percorso
+                        </button>
+                        <button class="btn btn-stop" id="btn-stop" style="display:none;" title="Ferma l'elaborazione">
+                            ⏹ Stop
+                        </button>
+                    </div>
                     
                     <div class="progress-container" id="progress-container">
                         <div class="progress-bar-bg" id="progress-bar-bg" data-percent="0%">
