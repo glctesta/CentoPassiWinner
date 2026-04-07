@@ -40,7 +40,8 @@ _current_optimizer = None      # Reference to running optimizer (for cancellatio
 _current_route = None          # Route object for live editing
 _available_wp_ids = set()      # WP IDs not yet assigned to any day
 
-OPTIMIZATION_TIMEOUT_SEC = 90   # 90s max — dopo mostra errore chiaro
+OPTIMIZATION_TIMEOUT_SEC = 90        # senza OSRM
+OPTIMIZATION_TIMEOUT_OSRM_SEC = 360  # con OSRM (96 seg × 1.1s ≈ 106s + margine)
 
 # Road routing computation status (async, separate from optimization)
 _routing_status = {
@@ -274,11 +275,22 @@ def api_optimize():
     thread = threading.Thread(target=run_optimization, daemon=True)
     thread.start()
 
-    # Watchdog: cancel optimizer if it exceeds timeout
+    # Watchdog: timeout dinamico (OSRM richiede molto più tempo)
+    timeout = OPTIMIZATION_TIMEOUT_OSRM_SEC if use_osrm else OPTIMIZATION_TIMEOUT_SEC
+
     def watchdog():
-        thread.join(timeout=OPTIMIZATION_TIMEOUT_SEC)
+        thread.join(timeout=timeout)
         if thread.is_alive() and _current_optimizer:
-            _current_optimizer.cancel()
+            # Non annullare se siamo quasi alla fine (es. fase OSRM avanzata)
+            pct = _optimization_status.get('percent', 0)
+            if pct >= 80:
+                # Aspetta ancora fino a OPTIMIZATION_TIMEOUT_OSRM_SEC comunque
+                extra = OPTIMIZATION_TIMEOUT_OSRM_SEC - timeout
+                if extra > 0:
+                    thread.join(timeout=extra)
+            if thread.is_alive() and _current_optimizer:
+                print(f"[WATCHDOG] Timeout ({timeout}s + extra) — annullamento forzato", flush=True)
+                _current_optimizer.cancel()
 
     threading.Thread(target=watchdog, daemon=True).start()
 
